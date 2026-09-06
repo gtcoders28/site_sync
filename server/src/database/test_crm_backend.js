@@ -65,17 +65,15 @@ async function runTests() {
     );
     console.log('✓ Global product created:', product.product_id, product.variant_name, `@ ₹${product.unit_price}`);
 
-    // 3. REGIONAL DISTRIBUTOR ONBOARDING
+    // 3. REGIONAL DISTRIBUTOR ONBOARDING (Platform Owner creates distributor)
     console.log('\n[3] Onboarding Regional Distributor under Platform Owner...');
-    const distResult = await authService.signUpDistributor(
+    const distResult = await authService.createDistributor(
       {
         mobileNumber: distMobile,
         password: 'Password@123',
         companyName: `Regional Distributor ${randomSuffix}`,
         ownerName: 'Regional Lead',
         email: `dist_${randomSuffix}@apex.com`,
-        isPlatformOwner: false,
-        parentDistributorId: platformOwner.distributor_id,
       },
       ownerContext
     );

@@ -3,7 +3,7 @@ const { APIResponse } = require('../../utils/apiResponse');
 
 class AuthController {
   constructor() {
-    this.registerDistributor = this.registerDistributor.bind(this);
+    this.createDistributor = this.createDistributor.bind(this);
     this.registerDealer = this.registerDealer.bind(this);
     this.registerCustomer = this.registerCustomer.bind(this);
     this.registerInfluencer = this.registerInfluencer.bind(this);
@@ -17,10 +17,10 @@ class AuthController {
     this.getMe = this.getMe.bind(this);
   }
 
-  async registerDistributor(req, res, next) {
+  async createDistributor(req, res, next) {
     try {
-      const result = await authService.signUpDistributor(req.body, req.user);
-      return APIResponse.created(res, 'Distributor registered successfully', result);
+      const result = await authService.createDistributor(req.body, req.user);
+      return APIResponse.created(res, 'Distributor created successfully by Platform Owner', result);
     } catch (err) {
       next(err);
     }

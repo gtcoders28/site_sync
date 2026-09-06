@@ -14,7 +14,7 @@ const refreshTokenSchema = z.object({
   refreshToken: z.string().min(1, 'Refresh token is required'),
 });
 
-const signUpDistributorSchema = z.object({
+const createDistributorSchema = z.object({
   mobileNumber: z.string().trim().regex(indianMobileRegex, 'Valid 10-digit mobile number required'),
   password: z.string().min(6, 'Password must be at least 6 characters'),
   companyName: z.string().trim().min(2, 'Company name is required'),
@@ -26,8 +26,6 @@ const signUpDistributorSchema = z.object({
   city: z.string().trim().optional().nullable(),
   state: z.string().trim().optional().nullable(),
   pincode: z.string().trim().optional().nullable(),
-  isPlatformOwner: z.boolean().optional().default(false),
-  parentDistributorId: z.string().uuid('Invalid parent distributor ID').optional().nullable(),
 });
 
 const signUpDealerSchema = z.object({
@@ -78,7 +76,7 @@ const signUpInfluencerSchema = z.object({
 module.exports = {
   signInSchema,
   refreshTokenSchema,
-  signUpDistributorSchema,
+  createDistributorSchema,
   signUpDealerSchema,
   signUpCustomerSchema,
   signUpInfluencerSchema,

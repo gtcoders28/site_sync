@@ -7,9 +7,14 @@ const { ROLES, DISTRIBUTOR_STATUS, DEALER_STATUS, CUSTOMER_STATUS, INFLUENCER_ST
 
 class AuthService {
   /**
-   * Register a new Distributor (Platform Owner or Regional Distributor)
+  /**
+   * Create a new Regional Distributor (Platform Owner strictly required)
    */
-  async signUpDistributor(data, creatorUser = null) {
+  async createDistributor(data, creatorUser) {
+    if (!creatorUser || !creatorUser.isPlatformOwner) {
+      throw APIError.forbidden('Only the Platform Owner can create new distributors.', 'PLATFORM_OWNER_REQUIRED');
+    }
+
     const {
       mobileNumber,
       password,
@@ -22,32 +27,13 @@ class AuthService {
       city,
       state,
       pincode,
-      isPlatformOwner = false,
-      parentDistributorId = null,
     } = data;
 
     // Check if mobile already exists in any user table
     await this._assertMobileUnique(mobileNumber);
 
-    // Platform Owner authorization check
-    if (isPlatformOwner) {
-      const existingOwnerRes = await query('SELECT distributor_id FROM distributors WHERE is_platform_owner = TRUE LIMIT 1');
-      if (existingOwnerRes.rows.length > 0) {
-        // If an owner exists, only that owner can create another platform owner
-        if (!creatorUser || !creatorUser.isPlatformOwner) {
-          throw APIError.forbidden('Only the existing Platform Owner can create another Platform Owner account.', 'PLATFORM_OWNER_REQUIRED');
-        }
-      }
-    } else {
-      // Regular distributor requires valid parent distributor
-      if (!parentDistributorId) {
-        throw APIError.badRequest('Non-platform owner distributors must specify a valid parent_distributor_id');
-      }
-      const parentCheck = await query('SELECT distributor_id FROM distributors WHERE distributor_id = $1', [parentDistributorId]);
-      if (parentCheck.rows.length === 0) {
-        throw APIError.badRequest('Parent distributor does not exist', null, 'INVALID_PARENT_DISTRIBUTOR');
-      }
-    }
+    const isPlatformOwner = false;
+    const parentDistributorId = creatorUser.distributorId || creatorUser.id;
 
     const hashedPassword = await hashPassword(password);
     const inviteCode = generateUniqueCode('DIST', 6);

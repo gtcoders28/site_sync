@@ -3,11 +3,12 @@ const router = express.Router();
 const authController = require('./auth.controller');
 const { validate } = require('../../middlewares/validate.middleware');
 const { authenticate, optionalAuthenticate } = require('../../middlewares/auth.middleware');
+const { requirePlatformOwner } = require('../../middlewares/rbac.middleware');
 const { authRateLimiter } = require('../../middlewares/rateLimiter.middleware');
 const {
   signInSchema,
   refreshTokenSchema,
-  signUpDistributorSchema,
+  createDistributorSchema,
   signUpDealerSchema,
   signUpCustomerSchema,
   signUpInfluencerSchema,
@@ -22,8 +23,10 @@ router.post('/dealer/signin', authRateLimiter, validate(signInSchema), authContr
 router.post('/customer/signin', authRateLimiter, validate(signInSchema), authController.signInCustomer);
 router.post('/influencer/signin', authRateLimiter, validate(signInSchema), authController.signInInfluencer);
 
+// Platform Owner ONLY: Create Regional Distributor (no public self-registration)
+router.post('/distributor/create', authenticate, requirePlatformOwner, validate(createDistributorSchema), authController.createDistributor);
+
 // Role-Specific Sign Up (supports both authenticated creator and public self-registration)
-router.post('/distributor/signup', authRateLimiter, optionalAuthenticate, validate(signUpDistributorSchema), authController.registerDistributor);
 router.post('/dealer/signup', authRateLimiter, optionalAuthenticate, validate(signUpDealerSchema), authController.registerDealer);
 router.post('/customer/signup', authRateLimiter, optionalAuthenticate, validate(signUpCustomerSchema), authController.registerCustomer);
 router.post('/influencer/signup', authRateLimiter, optionalAuthenticate, validate(signUpInfluencerSchema), authController.registerInfluencer);
