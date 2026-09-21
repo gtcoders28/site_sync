@@ -306,7 +306,7 @@ export default function ProfileView({ mode = 'all' }: { mode?: 'all' | 'profile'
               <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">
                 EMAIL ADDRESS
               </p>
-              <p className="text-sm font-semibold text-slate-800 break-all">{profile?.email || 'partner@sitesync.enterprise.in'}</p>
+              <p className="text-sm font-semibold text-slate-800 break-all">{profile?.email || 'Not Provided'}</p>
             </div>
           </div>
 
@@ -318,7 +318,7 @@ export default function ProfileView({ mode = 'all' }: { mode?: 'all' | 'profile'
               <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">
                 PHONE NUMBER
               </p>
-              <p className="text-sm font-semibold text-slate-800">{profile?.phone || 'Registered Mobile'}</p>
+              <p className="text-sm font-semibold text-slate-800">{profile?.phone || 'Not Provided'}</p>
             </div>
           </div>
 
@@ -330,7 +330,7 @@ export default function ProfileView({ mode = 'all' }: { mode?: 'all' | 'profile'
               <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">
                 PRIMARY ADDRESS
               </p>
-              <p className="text-sm font-semibold text-slate-800 leading-relaxed">{profile?.address || 'Primary Business Address, India'}</p>
+              <p className="text-sm font-semibold text-slate-800 leading-relaxed">{profile?.address || 'Address Not Specified'}</p>
             </div>
           </div>
         </div>

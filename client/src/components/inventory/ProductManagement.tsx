@@ -24,6 +24,7 @@ import { Toast, ToastMessage } from '../ui/Toast';
 import { EmptyState } from '../ui/EmptyState';
 import { CustomDropdown } from '../ui/CustomDropdown';
 import { useAuth } from '../../context/AuthContext';
+import { inventoryApi, catalogApi } from '../../lib/api';
 
 export interface InventoryItem {
   id: string;
@@ -89,18 +90,50 @@ export default function ProductManagement() {
   const loadInventory = async () => {
     try {
       setLoading(true);
-      const roleParam = isDealer ? 'dealer' : 'distributor';
-      const dId = user?.rawId || user?.dealerId || 'default_dealer';
-      const res = await fetch(`/api/sitesync/inventory?role=${roleParam}&dealerId=${encodeURIComponent(dId)}`);
-      const json = await res.json();
-      if (json.success && Array.isArray(json.data)) {
-        setInventory(json.data);
-        setAlerts(json.alerts || []);
-        if (json.summary) setSummary(json.summary);
-        if (!selectedProductId && json.data.length > 0) {
-          setSelectedProductId(json.data[0].rawId);
-          setUnitCost(String(json.data[0].price));
-        }
+      const [invRes, prodsRes] = await Promise.all([
+        isDealer ? inventoryApi.getDealerInventory() : inventoryApi.getDistributorInventory(),
+        catalogApi.getProducts().catch(() => ({ success: true, data: [] })),
+      ]);
+
+      const rawInv = Array.isArray(invRes?.data) ? invRes.data : [];
+      const mapped: InventoryItem[] = rawInv.map((item: any) => {
+        const available = Number(item.quantity_available || 0);
+        const inTransit = Number(item.quantity_in_transit || 0);
+        const thresh = 50;
+        const isOutOf = available === 0;
+        const isLow = available > 0 && available < thresh;
+
+        return {
+          id: item.product_id?.slice(0, 8) || 'SKU',
+          rawId: item.product_id,
+          name: item.variant_name || 'Standard Material',
+          category: item.category_name || 'General Materials',
+          brand: item.brand_name || 'Approved Brand',
+          unit: item.unit || 'units',
+          price: Number(item.unit_price || 0),
+          stock: available,
+          inTransit,
+          threshold: thresh,
+          isLowStock: isLow,
+          isOutOfStock: isOutOf,
+          status: isOutOf ? 'Out of Stock' : isLow ? 'Low Stock' : 'In Stock',
+          grade: 'Commercial Grade',
+          attributes: {},
+        };
+      });
+
+      setInventory(mapped);
+      const lowList = mapped.filter((i) => i.isLowStock || i.isOutOfStock);
+      setAlerts(lowList);
+      setSummary({
+        totalProducts: mapped.length,
+        lowStockCount: lowList.length,
+        healthyCount: mapped.length - lowList.length,
+      });
+
+      if (!selectedProductId && mapped.length > 0) {
+        setSelectedProductId(mapped[0].rawId);
+        setUnitCost(String(mapped[0].price));
       }
     } catch (err) {
       console.error('Failed to load inventory:', err);
@@ -111,7 +144,7 @@ export default function ProductManagement() {
 
   useEffect(() => {
     loadInventory();
-  }, [user?.role, user?.rawId]);
+  }, [user?.role, user?.mobile_number]);
 
   // Open Add Product Modal with defaults
   const handleOpenAddProduct = () => {
@@ -139,28 +172,44 @@ export default function ProductManagement() {
       return;
     }
     const initialQty = parseFloat(newProdInitialStock) || 0;
-    const thresh = parseFloat(newProdThreshold) || (newProdCategory === 'Cement' ? 100 : 5);
 
     setIsCreatingProduct(true);
     try {
-      const res = await fetch('/api/sitesync/products', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: newProdName.trim(),
-          category: newProdCategory,
-          brand: newProdBrand.trim() || 'Standard Brand',
-          grade: newProdGrade.trim() || 'Standard Grade',
-          unit: newProdUnit.trim(),
-          price: priceNum,
-          initialStock: initialQty,
-          threshold: thresh,
-        }),
+      // 1. Fetch or create Brand
+      const brandsRes = await catalogApi.getBrands().catch(() => ({ success: true, data: [] }));
+      const brands = Array.isArray(brandsRes?.data) ? brandsRes.data : [];
+      let targetBrand = brands.find((b: any) => b.brand_name.toLowerCase() === newProdBrand.trim().toLowerCase());
+      if (!targetBrand) {
+        const bRes = await catalogApi.createBrand(newProdBrand.trim() || 'UltraTech');
+        targetBrand = bRes.data;
+      }
+
+      // 2. Fetch or create Category
+      const catsRes = await catalogApi.getCategories().catch(() => ({ success: true, data: [] }));
+      const categories = Array.isArray(catsRes?.data) ? catsRes.data : [];
+      let targetCategory = categories.find((c: any) => c.category_name.toLowerCase() === newProdCategory.toLowerCase());
+      if (!targetCategory) {
+        const cRes = await catalogApi.createCategory(newProdCategory, newProdUnit.trim() || 'units');
+        targetCategory = cRes.data;
+      }
+
+      // 3. Create Product
+      const prodRes = await catalogApi.createProduct({
+        categoryId: targetCategory.category_id,
+        brandId: targetBrand.brand_id,
+        variantName: newProdName.trim(),
+        unit: newProdUnit.trim() || 'units',
+        unitPrice: priceNum,
+        attributes: { grade: newProdGrade.trim() || 'Standard Grade' },
       });
 
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        throw new Error(json.message || 'Failed to add product.');
+      // 4. Initial Stock Intake
+      if (initialQty > 0 && prodRes?.data?.product_id) {
+        await inventoryApi.adjustStock({
+          productId: prodRes.data.product_id,
+          quantityChange: initialQty,
+          notes: 'Initial warehouse intake registration',
+        });
       }
 
       setIsAddProductModalOpen(false);
@@ -168,7 +217,7 @@ export default function ProductManagement() {
       setToast({
         id: String(Date.now()),
         type: 'success',
-        message: `Product "${newProdName}" added successfully with initial stock of ${initialQty} ${newProdUnit}!`,
+        message: `Product "${newProdName}" added to catalog and warehouse with ${initialQty} units!`,
       });
     } catch (err: any) {
       console.error('Error adding product:', err);
@@ -192,40 +241,40 @@ export default function ProductManagement() {
     e.preventDefault();
     if (!adjustingItem) return;
 
-    const qty = parseFloat(adjustQuantity);
-    if (isNaN(qty) || qty < 0) {
+    const targetQty = parseFloat(adjustQuantity);
+    if (isNaN(targetQty) || targetQty < 0) {
       setToast({ id: String(Date.now()), type: 'error', message: 'Please enter a valid stock quantity.' });
+      return;
+    }
+
+    let diff = 0;
+    if (adjustOperation === 'set') {
+      diff = targetQty - adjustingItem.stock;
+    } else if (adjustOperation === 'add') {
+      diff = targetQty;
+    } else if (adjustOperation === 'subtract') {
+      diff = -targetQty;
+    }
+
+    if (diff === 0) {
+      setIsAdjustStockModalOpen(false);
       return;
     }
 
     setIsAdjustingStock(true);
     try {
-      const roleParam = isDealer ? 'dealer' : 'distributor';
-      const dId = user?.rawId || user?.dealerId || 'default_dealer';
-      const res = await fetch('/api/sitesync/inventory/adjust', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          productId: adjustingItem.rawId,
-          operation: adjustOperation,
-          quantity: qty,
-          role: roleParam,
-          dealerId: dId,
-          reason: adjustReason.trim(),
-        }),
+      await inventoryApi.adjustStock({
+        productId: adjustingItem.rawId,
+        quantityChange: diff,
+        notes: adjustReason.trim() || 'Manual stock update',
       });
-
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        throw new Error(json.message || 'Failed to adjust stock level.');
-      }
 
       setIsAdjustStockModalOpen(false);
       await loadInventory();
       setToast({
         id: String(Date.now()),
         type: 'success',
-        message: json.message || `Stock for ${adjustingItem.name} updated to ${qty} ${adjustingItem.unit}.`,
+        message: `Stock for ${adjustingItem.name} updated in PostgreSQL database.`,
       });
     } catch (err: any) {
       console.error('Error updating stock:', err);
@@ -237,26 +286,17 @@ export default function ProductManagement() {
 
   // Delete Product
   const handleDeleteProduct = async (item: InventoryItem) => {
-    if (!window.confirm(`Are you sure you want to remove "${item.name}" from the inventory catalog?`)) return;
-
     try {
-      const res = await fetch(`/api/sitesync/products/${encodeURIComponent(item.rawId)}`, {
-        method: 'DELETE',
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        throw new Error(json.message || 'Failed to remove product.');
-      }
-
+      await catalogApi.updateProduct(item.rawId, { status: 'discontinued' });
       await loadInventory();
       setToast({
         id: String(Date.now()),
         type: 'success',
-        message: `Product "${item.name}" removed from catalog.`,
+        message: `Product "${item.name}" marked as discontinued.`,
       });
     } catch (err: any) {
       console.error('Error removing product:', err);
-      setToast({ id: String(Date.now()), type: 'error', message: err.message || 'Failed to remove product.' });
+      setToast({ id: String(Date.now()), type: 'error', message: err.message || 'Failed to discontinue product.' });
     }
   };
 
@@ -269,15 +309,15 @@ export default function ProductManagement() {
       setInboundQuantity(isCement ? '500' : '20');
       setSupplierName(
         isDealer
-          ? 'North Zone Logistics Ltd (Distributor)'
-          : `${item.brand} Regional Manufacturing Plant`
+          ? 'Regional Logistics Hub'
+          : `${item.brand} Manufacturing Plant`
       );
     } else if (inventory.length > 0) {
       setSelectedProductId(inventory[0].rawId);
       setUnitCost(String(inventory[0].price));
       const isCement = inventory[0].category.toLowerCase().includes('cement');
       setInboundQuantity(isCement ? '500' : '20');
-      setSupplierName(isDealer ? 'North Zone Logistics Ltd' : `${inventory[0].brand} Plant`);
+      setSupplierName(isDealer ? 'Regional Logistics Hub' : `${inventory[0].brand} Plant`);
     } else {
       setSupplierName('Regional Manufacturing Plant');
     }
@@ -293,47 +333,38 @@ export default function ProductManagement() {
   const handleLogStock = async (e: React.FormEvent) => {
     e.preventDefault();
     const qty = parseFloat(inboundQuantity);
-    const cost = parseFloat(unitCost);
 
     if (isNaN(qty) || qty <= 0) {
       setToast({ id: String(Date.now()), type: 'error', message: 'Please enter a quantity greater than 0.' });
       return;
     }
+    if (!selectedProductId) {
+      setToast({ id: String(Date.now()), type: 'error', message: 'Please select a product.' });
+      return;
+    }
 
     setIsSubmittingLog(true);
     try {
-      const selectedItem = inventory.find((i) => i.rawId === selectedProductId);
-      const resp = await fetch('/api/sitesync/inventory/log', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          role: isDealer ? 'dealer' : 'distributor',
-          dealerId: isDealer ? (user?.rawId || user?.dealerId || 'default_dealer') : null,
-          distributorId: user?.rawId || user?.distributorId || null,
-          productId: selectedProductId,
-          productName: selectedItem?.name,
-          quantity: qty,
-          unitPrice: isNaN(cost) ? 0 : cost,
-          supplierName: supplierName.trim() || 'Central Plant',
-          invoiceNumber: invoiceNumber.trim() || `INV-${Date.now()}`,
-        }),
+      await inventoryApi.adjustStock({
+        productId: selectedProductId,
+        quantityChange: qty,
+        notes: `Delivery Challan ${invoiceNumber} from ${supplierName}`,
       });
-
-      const json = await resp.json();
-      if (!resp.ok || !json.success) {
-        throw new Error(json.message || 'Failed to log delivery.');
-      }
 
       setIsLogModalOpen(false);
       await loadInventory();
       setToast({
         id: String(Date.now()),
         type: 'success',
-        message: json.message || `+${qty} ${selectedItem?.unit || 'units'} recorded successfully!`,
+        message: `Inbound consignment of ${qty} units recorded into warehouse stock!`,
       });
     } catch (err: any) {
-      console.error('Error logging delivery:', err);
-      setToast({ id: String(Date.now()), type: 'error', message: err.message || 'Failed to log delivery.' });
+      console.error('Error logging stock:', err);
+      setToast({
+        id: String(Date.now()),
+        type: 'error',
+        message: err.message || 'Failed to record inbound consignment.',
+      });
     } finally {
       setIsSubmittingLog(false);
     }

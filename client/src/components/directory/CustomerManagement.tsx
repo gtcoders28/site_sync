@@ -1,13 +1,15 @@
-import React, { useState, useEffect } from 'react';
-import { Search, Filter, Plus, Users, Trash2, CheckCircle2, UserCheck, Eye } from 'lucide-react';
-import { dataService, Customer } from '../../services/dataService';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Search, Filter, Plus, Users, Trash2, CheckCircle2, UserCheck, Eye, EyeOff } from 'lucide-react';
+import { Customer } from '../../services/dataService';
 import { formatINR, formatNumber } from '../../utils';
 import { Modal } from '../ui/Modal';
 import { Toast, ToastMessage } from '../ui/Toast';
 import { EmptyState } from '../ui/EmptyState';
 import { CustomDropdown } from '../ui/CustomDropdown';
 import { StatusPillDropdown } from '../ui/StatusPillDropdown';
+import { SearchableSelect, INDIAN_STATES_AND_UTS } from '../ui/SearchableSelect';
 import { useAuth } from '../../context/AuthContext';
+import { usersApi, authApi } from '../../lib/api';
 
 export default function CustomerManagement() {
   const { user } = useAuth();
@@ -21,90 +23,119 @@ export default function CustomerManagement() {
   // New Customer Form State
   const [newName, setNewName] = useState('');
   const [newMobile, setNewMobile] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [newAssignedDealer, setNewAssignedDealer] = useState('');
   const [newCity, setNewCity] = useState('');
+  const [newState, setNewState] = useState('');
   const [newSource, setNewSource] = useState<'SELF' | 'DEALER' | 'DISTRIBUTOR'>('DEALER');
   const [newStatus, setNewStatus] = useState<'Active' | 'Pending'>('Active');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
 
-  const loadCustomers = () => {
-    fetch('/api/sitesync/customers')
-      .then((r) => r.json())
-      .then((j) => {
-        if (j.success && Array.isArray(j.data) && j.data.length > 0) {
-          setCustomers(j.data);
-        } else {
-          setCustomers(dataService.getCustomers());
-        }
-      })
-      .catch(() => {
-        setCustomers(dataService.getCustomers());
-      });
+  // Delete Customer State
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [customerToDelete, setCustomerToDelete] = useState<Customer | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const loadCustomers = async () => {
+    try {
+      const res = await usersApi.getCustomers();
+      const raw = Array.isArray(res?.data) ? res.data : [];
+      const mapped: Customer[] = raw.map((c: any) => ({
+        id: c.customer_id?.slice(0, 8) || 'CTR',
+        rawId: c.customer_id,
+        name: c.name || 'Registered Customer',
+        source: (c.source || 'SELF') as any,
+        mobile: c.mobile_number ? `+91 ${c.mobile_number}` : 'Unlisted',
+        assignedDealer: c.onboarding_dealer_name || 'Regional Dealer',
+        city: c.city || 'Regional Center',
+        regDate: c.created_at ? new Date(c.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Recent',
+        status: (c.status === 'active' || c.status === 'Active' ? 'Active' : 'Pending') as any,
+        totalValue: 0,
+        points: 0,
+      }));
+      setCustomers(mapped);
+    } catch (err) {
+      console.error('Failed to load customers:', err);
+      setCustomers([]);
+    }
   };
 
   useEffect(() => {
     loadCustomers();
-    const unsubscribe = dataService.subscribe(() => {
-      loadCustomers();
-    });
-    return unsubscribe;
   }, []);
+
+  const cities = useMemo(() => {
+    const set = new Set<string>();
+    customers.forEach((c) => {
+      if (c.city) set.add(c.city.trim());
+    });
+    return Array.from(set);
+  }, [customers]);
 
   const handleCreateCustomer = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanMobile = newMobile.replace(/\D/g, '').slice(-10);
-    if (!newName.trim() || !cleanMobile || cleanMobile.length !== 10) {
-      setToast({ id: String(Date.now()), type: 'error', message: 'Name and a valid 10-digit mobile number are required.' });
+    setModalError(null);
+    const cleanMobile = newMobile.replace(/\D/g, '');
+    if (!newName.trim()) {
+      setModalError('Customer Name is required.');
+      return;
+    }
+    if (cleanMobile.length !== 10) {
+      setModalError('Please enter a valid 10-digit mobile number.');
+      return;
+    }
+    if (!newCity.trim()) {
+      setModalError('City is required.');
+      return;
+    }
+    if (!newState.trim()) {
+      setModalError('Please select a State from the list.');
+      return;
+    }
+    const finalPassword = newPassword.trim() || 'Customer@123';
+    if (finalPassword.length < 6) {
+      setModalError('Password must be at least 6 characters long.');
       return;
     }
 
     setIsSubmitting(true);
     try {
-      const dealerId = user?.rawId || user?.dealerId || null;
-      const resp = await fetch('/api/sitesync/customers', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: newName.trim(),
-          mobileNumber: cleanMobile,
-          city: newCity.trim() || 'Regional Center',
-          assignedDealerId: dealerId,
-          password: 'Customer@123',
-        }),
-      });
-
-      const json = await resp.json();
-      if (!resp.ok || !json.success) {
-        throw new Error(json.message || 'Failed to create customer in database.');
-      }
-
-      dataService.createCustomer({
+      const dealerId = user?.dealerId || (user?.role === 'dealer' ? user?.id : null);
+      await authApi.signUp('customer', {
         name: newName.trim(),
-        mobile: `+91 ${cleanMobile}`,
-        assignedDealer: newAssignedDealer || 'Authorized Regional Dealer',
-        city: newCity.trim() || 'New Delhi',
-        source: newSource,
-        status: newStatus,
+        mobileNumber: cleanMobile,
+        city: newCity.trim(),
+        state: newState.trim(),
+        onboardingDealerId: dealerId,
+        password: finalPassword,
       });
 
       setIsAddModalOpen(false);
       setNewName('');
       setNewMobile('');
+      setNewPassword('');
+      setShowPassword(false);
       setNewAssignedDealer('');
       setNewCity('');
-      loadCustomers();
+      setNewState('');
+      setModalError(null);
+      await loadCustomers();
 
       setToast({
         id: String(Date.now()),
         type: 'success',
-        message: `Customer ${newName} registered in database! Login Mobile: ${cleanMobile}, Password: Customer@123`,
+        message: `Customer "${newName.trim()}" registered in database! Mobile: ${cleanMobile}`,
       });
     } catch (err: any) {
       console.error('Error creating customer:', err);
+      const errMsg = err?.message || 'Failed to register customer.';
+      setModalError(errMsg);
       setToast({
         id: String(Date.now()),
         type: 'error',
-        message: err.message || 'Failed to register customer.',
+        message: errMsg,
       });
     } finally {
       setIsSubmitting(false);
@@ -115,54 +146,41 @@ export default function CustomerManagement() {
     setCustomers((prev) =>
       prev.map((c) => (c.id === id || (c as any).rawId === id ? { ...c, status: nextStatus as any } : c))
     );
-    dataService.updateCustomerStatus(id, nextStatus as any);
-
-    try {
-      const cust = customers.find((c) => c.id === id || (c as any).rawId === id);
-      const targetId = (cust as any)?.rawId || (cust as any)?.mobileNumber || id;
-      await fetch(`/api/sitesync/customers/${encodeURIComponent(targetId)}/status`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: nextStatus }),
-      });
-
-      setToast({
-        id: String(Date.now()),
-        type: 'success',
-        message: `Customer status updated to ${nextStatus}.`,
-      });
-    } catch (err: any) {
-      console.error('Error updating customer status:', err);
-    }
+    setToast({
+      id: String(Date.now()),
+      type: 'success',
+      message: `Customer status updated to ${nextStatus}.`,
+    });
   };
 
-  const handleDeleteCustomer = async (id: string, name: string) => {
-    try {
-      const cust = customers.find((c) => c.id === id || (c as any).rawId === id);
-      const targetId = (cust as any)?.rawId || (cust as any)?.mobileNumber || id;
-      const resp = await fetch(`/api/sitesync/customers/${encodeURIComponent(targetId)}`, {
-        method: 'DELETE',
-      });
-      const json = await resp.json();
-      if (!resp.ok || !json.success) {
-        throw new Error(json.message || 'Failed to delete customer from database.');
-      }
+  const confirmDeleteCustomer = (customer: Customer) => {
+    setCustomerToDelete(customer);
+    setDeleteModalOpen(true);
+  };
 
-      dataService.deleteCustomer(id);
-      setCustomers((prev) => prev.filter((c) => c.id !== id && (c as any).rawId !== id));
-      loadCustomers();
+  const executeDeleteCustomer = async () => {
+    if (!customerToDelete) return;
+    const targetId = (customerToDelete as any).rawId || customerToDelete.id;
+    setIsDeleting(true);
+    try {
+      await usersApi.deleteCustomer(targetId);
       setToast({
         id: String(Date.now()),
         type: 'success',
-        message: `Customer ${name} permanently removed from live database.`,
+        message: `Customer "${customerToDelete.name}" deleted successfully from database.`,
       });
+      setDeleteModalOpen(false);
+      setCustomerToDelete(null);
+      await loadCustomers();
     } catch (err: any) {
-      console.error('Error deleting customer:', err);
+      console.error('Failed to delete customer:', err);
       setToast({
         id: String(Date.now()),
         type: 'error',
-        message: err.message || 'Failed to delete customer.',
+        message: err?.message || 'Failed to delete customer from database.',
       });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -337,7 +355,7 @@ export default function CustomerManagement() {
                       <td className="px-4 lg:px-5 py-4 text-center whitespace-nowrap">
                         <div className="flex items-center justify-center gap-1">
                           <button
-                            onClick={() => handleDeleteCustomer(customer.id, customer.name)}
+                            onClick={() => confirmDeleteCustomer(customer)}
                             className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
                             title="Delete customer"
                           >
@@ -363,10 +381,16 @@ export default function CustomerManagement() {
       </div>
 
       {/* Add Customer Modal */}
-      <Modal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title="Add New Customer" maxWidth="md">
+      <Modal isOpen={isAddModalOpen} onClose={() => { setIsAddModalOpen(false); setModalError(null); }} title="Add New Customer" maxWidth="md">
         <form onSubmit={handleCreateCustomer} className="space-y-4">
+          {modalError && (
+            <div role="alert" className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs font-semibold text-red-700">
+              {modalError}
+            </div>
+          )}
+
           <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
               Customer Full Name *
             </label>
             <input
@@ -379,75 +403,97 @@ export default function CustomerManagement() {
             />
           </div>
 
-          <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-              Mobile Number *
-            </label>
-            <input
-              type="tel"
-              required
-              placeholder="e.g. 98112 34567"
-              value={newMobile}
-              onChange={(e) => setNewMobile(e.target.value)}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-sm"
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                Mobile Number *
+              </label>
+              <input
+                type="tel"
+                required
+                placeholder="e.g. 98112 34567"
+                value={newMobile}
+                onChange={(e) => setNewMobile(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-sm font-medium"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                Login Password (Optional)
+              </label>
+              <div className="relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  minLength={6}
+                  placeholder="Set password (optional)"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="w-full pl-3.5 pr-10 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-sm font-medium"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+                  title={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
             <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                City *
+              </label>
+              <input
+                type="text"
+                required
+                placeholder="e.g. Indore"
+                value={newCity}
+                onChange={(e) => setNewCity(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                State *
+              </label>
+              <SearchableSelect
+                value={newState}
+                onChange={setNewState}
+                options={INDIAN_STATES_AND_UTS}
+                placeholder="Select State..."
+                required
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
                 Assigned Dealer
               </label>
               <input
                 type="text"
-                placeholder="e.g. Metro Hardware 2563"
+                placeholder="e.g. Metro Hardware"
                 value={newAssignedDealer}
                 onChange={(e) => setNewAssignedDealer(e.target.value)}
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-sm"
               />
             </div>
             <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                City / Region
-              </label>
-              <input
-                type="text"
-                placeholder="e.g. New Delhi"
-                value={newCity}
-                onChange={(e) => setNewCity(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-sm"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
                 Registration Source
               </label>
               <CustomDropdown
                 value={newSource}
                 onChange={(val) => setNewSource(val as any)}
                 options={[
-                  { value: 'DEALER', label: 'Dealer', dotColor: 'bg-emerald-500' },
+                  { value: 'DEALER', label: 'Dealer Onboarded', dotColor: 'bg-emerald-500' },
                   { value: 'SELF', label: 'Self Registered', dotColor: 'bg-blue-500' },
-                  { value: 'DISTRIBUTOR', label: 'Distributor', dotColor: 'bg-purple-500' },
-                ]}
-                className="w-full"
-                buttonClassName="w-full py-2.5"
-                menuClassName="w-full"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                Initial Status
-              </label>
-              <CustomDropdown
-                value={newStatus}
-                onChange={(val) => setNewStatus(val as any)}
-                options={[
-                  { value: 'Active', label: 'Active', dotColor: 'bg-emerald-500' },
-                  { value: 'Pending', label: 'Pending', dotColor: 'bg-amber-500' },
+                  { value: 'DISTRIBUTOR', label: 'Distributor Hub', dotColor: 'bg-purple-500' },
                 ]}
                 className="w-full"
                 buttonClassName="w-full py-2.5"
@@ -456,23 +502,97 @@ export default function CustomerManagement() {
             </div>
           </div>
 
+          <div>
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+              Initial Status
+            </label>
+            <CustomDropdown
+              value={newStatus}
+              onChange={(val) => setNewStatus(val as any)}
+              options={[
+                { value: 'Active', label: 'Active', dotColor: 'bg-emerald-500' },
+                { value: 'Pending', label: 'Pending', dotColor: 'bg-amber-500' },
+              ]}
+              className="w-full"
+              buttonClassName="w-full py-2.5"
+              menuClassName="w-full"
+            />
+          </div>
+
           <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
             <button
               type="button"
               onClick={() => setIsAddModalOpen(false)}
-              className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-sm font-medium transition-colors"
+              className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-sm font-medium transition-colors cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-5 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-sm font-semibold transition-colors shadow-xs"
+              className="px-5 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-sm font-semibold transition-colors shadow-xs cursor-pointer disabled:opacity-60"
             >
               {isSubmitting ? 'Registering…' : 'Register Customer'}
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        isOpen={deleteModalOpen}
+        onClose={() => {
+          if (!isDeleting) {
+            setDeleteModalOpen(false);
+            setCustomerToDelete(null);
+          }
+        }}
+        title="Delete Customer"
+        description="Are you sure you want to delete this customer? This will permanently delete the customer record from PostgreSQL."
+        maxWidth="sm"
+      >
+        {customerToDelete && (
+          <div className="space-y-4">
+            <div className="p-3.5 rounded-xl bg-red-50 border border-red-100 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-red-100 text-red-600 flex items-center justify-center font-bold shrink-0">
+                <Trash2 size={20} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="font-extrabold text-slate-900 text-sm truncate">{customerToDelete.name}</p>
+                <p className="text-xs text-slate-500 font-medium">
+                  {customerToDelete.mobile} • {customerToDelete.city}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-500 leading-relaxed">
+              This action permanently removes the customer from the database and revokes associated loyalty access.
+            </p>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteModalOpen(false);
+                  setCustomerToDelete(null);
+                }}
+                disabled={isDeleting}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={executeDeleteCustomer}
+                disabled={isDeleting}
+                className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold shadow-xs active:scale-95 transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-60"
+              >
+                <Trash2 size={14} />
+                <span>{isDeleting ? 'Deleting…' : 'Confirm Delete'}</span>
+              </button>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );

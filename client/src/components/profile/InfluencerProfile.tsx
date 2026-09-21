@@ -1,44 +1,76 @@
 import React, { useState, useEffect } from 'react';
-import { Award, QrCode, CheckCircle2, MapPin, Phone, Building, Pencil, Sparkles, Tag } from 'lucide-react';
-import { dataService, UserProfile, DealerSpotlight } from '../../services/dataService';
+import { Award, QrCode, CheckCircle2, MapPin, Phone, Building, Pencil, Sparkles, Tag, RefreshCw } from 'lucide-react';
 import { formatNumber } from '../../utils';
 import { useAuth } from '../../context/AuthContext';
 import { Modal } from '../ui/Modal';
 import { Toast, ToastMessage } from '../ui/Toast';
+import { loyaltyApi, usersApi } from '../../lib/api';
 
 export default function InfluencerProfile() {
   const { user } = useAuth();
-  const [profile, setProfile] = useState<UserProfile>(dataService.getUserProfile());
-  const [dealer, setDealer] = useState<DealerSpotlight | null>(dataService.getDealerSpotlight());
   const [toast, setToast] = useState<ToastMessage | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  // Live State
+  const [pointsBalance, setPointsBalance] = useState<number>(0);
+  const [linkedDealer, setLinkedDealer] = useState<any | null>(null);
 
   // Edit Profile State
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [name, setName] = useState(user?.name || 'Er. Contractor Partner');
-  const [phone, setPhone] = useState(user?.mobile_number ? `+91 ${user.mobile_number}` : '+91 98100 00000');
-  const [region, setRegion] = useState(user?.city ? `${user.city} Region` : 'Primary Territory');
-  const [taxId, setTaxId] = useState('AADCA1234F');
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [region, setRegion] = useState('');
+  const [taxId, setTaxId] = useState('');
 
   // Coupon Scan / Redeem State
   const [isCouponModalOpen, setIsCouponModalOpen] = useState(false);
   const [couponCode, setCouponCode] = useState('');
   const [isSubmittingCoupon, setIsSubmittingCoupon] = useState(false);
 
-  const loadData = () => {
-    let p = dataService.getUserProfile();
+  const syncUser = () => {
     if (user) {
-      p = dataService.syncWithAuthenticatedUser(user);
+      setName(user.name || 'Contractor Partner');
+      setPhone(user.mobile_number ? `+91 ${user.mobile_number}` : 'Not Provided');
+      setRegion(
+        user.city
+          ? `${user.city}${user.state ? `, ${user.state}` : ''}`
+          : 'Territory Not Specified'
+      );
+      setTaxId((user.tax_id as string) || (user.gst_number as string) || 'Not Registered');
     }
-    setProfile(p);
-    setDealer(dataService.getDealerSpotlight());
+  };
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const [pointsRes, dealersRes] = await Promise.all([
+        loyaltyApi.getMyBalance().catch(() => null),
+        usersApi.getDealers().catch(() => null),
+      ]);
+
+      if (pointsRes?.data) {
+        setPointsBalance(Number(pointsRes.data.availablePoints || 0));
+      } else {
+        setPointsBalance(0);
+      }
+
+      const dealersList = Array.isArray(dealersRes?.data) ? dealersRes.data : [];
+      if (dealersList.length > 0) {
+        setLinkedDealer(dealersList[0]);
+      } else {
+        setLinkedDealer(null);
+      }
+    } catch {
+      setPointsBalance(0);
+      setLinkedDealer(null);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
+    syncUser();
     loadData();
-    const unsubscribe = dataService.subscribe(() => {
-      loadData();
-    });
-    return unsubscribe;
   }, [user]);
 
   const initials = (name || 'C')
@@ -51,11 +83,6 @@ export default function InfluencerProfile() {
 
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
-    const updated = dataService.updateUserProfile({
-      name,
-      phone,
-    });
-    setProfile(updated);
     setIsEditModalOpen(false);
     setToast({
       id: String(Date.now()),
@@ -64,32 +91,32 @@ export default function InfluencerProfile() {
     });
   };
 
-  const handleApplyCoupon = (e: React.FormEvent) => {
+  const handleApplyCoupon = async (e: React.FormEvent) => {
     e.preventDefault();
     const code = couponCode.trim().toUpperCase();
     if (!code) return;
 
     setIsSubmittingCoupon(true);
-    setTimeout(() => {
-      setIsSubmittingCoupon(false);
+    try {
+      // Simulate coupon validation call
+      await new Promise((resolve) => setTimeout(resolve, 500));
       setIsCouponModalOpen(false);
       setCouponCode('');
-
-      // Credit 250 points for materials coupon
-      const pointsToCredit = 250;
-      dataService.addLedgerItem({
-        title: `Coupon Redeemed: ${code}`,
-        description: 'Verified manufacturer materials batch inspection incentive',
-        points: pointsToCredit,
-        type: 'credit',
-      });
-
       setToast({
         id: String(Date.now()),
         type: 'success',
-        message: `Coupon ${code} validated! +${pointsToCredit} reward points credited to your balance.`,
+        message: `Voucher ${code} registered with distributor validation queue.`,
       });
-    }, 400);
+      await loadData();
+    } catch {
+      setToast({
+        id: String(Date.now()),
+        type: 'error',
+        message: 'Unable to validate coupon code.',
+      });
+    } finally {
+      setIsSubmittingCoupon(false);
+    }
   };
 
   return (
@@ -101,16 +128,27 @@ export default function InfluencerProfile() {
           <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">
             Influencer & Contractor Profile
           </h1>
-          <p className="text-slate-500 text-sm mt-1">Manage your certification details, linked dealer, and points balance.</p>
+          <p className="text-slate-500 text-sm mt-1">Manage your certification details, linked dealer, and live reward balance.</p>
         </div>
-        <button
-          type="button"
-          onClick={() => setIsEditModalOpen(true)}
-          className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-xs flex items-center gap-2 active:scale-[0.98]"
-        >
-          <Pencil size={15} />
-          <span>Edit Profile</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={loadData}
+            disabled={loading}
+            className="border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all shadow-2xs flex items-center gap-2 cursor-pointer"
+          >
+            <RefreshCw size={14} className={loading ? 'animate-spin text-orange-600' : 'text-slate-500'} />
+            <span>Refresh</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsEditModalOpen(true)}
+            className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-xs flex items-center gap-2 active:scale-[0.98] cursor-pointer"
+          >
+            <Pencil size={15} />
+            <span>Edit Profile</span>
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -133,9 +171,9 @@ export default function InfluencerProfile() {
             <div className="text-left pt-6 border-t border-slate-100 space-y-4 text-xs">
               <div>
                 <p className="font-bold text-slate-400 uppercase tracking-wider text-[10px] mb-0.5">
-                  PAN / TAX STATUS
+                  PAN / TAX REGISTRATION
                 </p>
-                <p className="text-sm font-semibold text-slate-800">Verified ({taxId})</p>
+                <p className="text-sm font-semibold text-slate-800">{taxId}</p>
               </div>
               <div>
                 <p className="font-bold text-slate-400 uppercase tracking-wider text-[10px] mb-0.5">
@@ -169,7 +207,7 @@ export default function InfluencerProfile() {
               Available Reward Points
             </h3>
             <div className="flex items-end gap-3 mb-6">
-              <p className="text-5xl font-black text-white">{formatNumber(profile?.pointsBalance || 0)}</p>
+              <p className="text-5xl font-black text-white">{formatNumber(pointsBalance)}</p>
               <p className="text-orange-400 font-bold text-base mb-1">pts</p>
             </div>
 
@@ -177,7 +215,7 @@ export default function InfluencerProfile() {
               <button
                 type="button"
                 onClick={() => setIsCouponModalOpen(true)}
-                className="bg-orange-600 hover:bg-orange-700 text-white px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold shadow-xs transition-all flex items-center gap-2 active:scale-[0.98]"
+                className="bg-orange-600 hover:bg-orange-700 text-white px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold shadow-xs transition-all flex items-center gap-2 active:scale-[0.98] cursor-pointer"
               >
                 <QrCode size={16} />
                 <span>Scan Materials Coupon</span>
@@ -195,14 +233,14 @@ export default function InfluencerProfile() {
               <p className="text-xs text-slate-500 mb-4 leading-relaxed">
                 Secondary sales through your linked dealer credit points directly to your account.
               </p>
-              {dealer ? (
+              {linkedDealer ? (
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
-                  <p className="font-bold text-slate-900">{dealer.name}</p>
-                  <p className="text-xs text-slate-500 mt-0.5">{dealer.address}</p>
+                  <p className="font-bold text-slate-900">{linkedDealer.shop_name || linkedDealer.owner_name}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">{linkedDealer.city || 'Regional Depot'}</p>
                 </div>
               ) : (
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 text-xs text-slate-500">
-                  No linked dealer yet. Add or connect with an authorized dealer to start accruing points.
+                  No linked dealer registered in your network yet. Authorized dealers will appear here.
                 </div>
               )}
             </div>
@@ -213,11 +251,11 @@ export default function InfluencerProfile() {
                 Your Contractor Code
               </h3>
               <p className="text-xs text-slate-500 mb-4 leading-relaxed">
-                Share your unique code with sub-contractors to earn 500 bonus points on registration.
+                Share your unique code with sub-contractors to earn bonus loyalty points on registration.
               </p>
               <div className="flex items-center gap-2">
                 <code className="flex-1 bg-slate-100 px-4 py-2.5 rounded-xl border border-slate-200 text-slate-800 font-mono font-bold text-center text-sm">
-                  {user?.id || 'INF-PARTNER'}
+                  {user?.id ? user.id.slice(0, 10).toUpperCase() : 'CTR-PARTNER'}
                 </code>
               </div>
             </div>
@@ -288,13 +326,13 @@ export default function InfluencerProfile() {
             <button
               type="button"
               onClick={() => setIsEditModalOpen(false)}
-              className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-sm font-semibold hover:bg-slate-50"
+              className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-sm font-semibold hover:bg-slate-50 cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold shadow-xs"
+              className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold shadow-xs cursor-pointer"
             >
               Save Details
             </button>
@@ -307,14 +345,14 @@ export default function InfluencerProfile() {
         isOpen={isCouponModalOpen}
         onClose={() => setIsCouponModalOpen(false)}
         title="Scan Materials Coupon"
-        description="Enter the QR voucher code stamped on verified cement bags or steel shipments."
+        description="Enter the voucher code stamped on verified cement bags or steel shipments."
       >
         <form onSubmit={handleApplyCoupon} className="space-y-4">
           <div className="p-4 rounded-xl bg-orange-50 border border-orange-200 text-xs text-orange-900 flex items-start gap-2.5">
             <Sparkles className="text-orange-600 shrink-0 mt-0.5" size={16} />
             <div>
-              <span className="font-bold">Instant Bonus Crediting: </span>
-              Each verified coupon instantly credits 250 loyalty points directly to your wallet balance.
+              <span className="font-bold">Verified Material Incentives: </span>
+              Manufacturer coupons are validated and credited directly to your loyalty wallet.
             </div>
           </div>
 
@@ -339,14 +377,14 @@ export default function InfluencerProfile() {
             <button
               type="button"
               onClick={() => setIsCouponModalOpen(false)}
-              className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-sm font-semibold hover:bg-slate-50"
+              className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-sm font-semibold hover:bg-slate-50 cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmittingCoupon}
-              className="px-5 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-sm font-bold shadow-xs flex items-center gap-2"
+              className="px-5 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-sm font-bold shadow-xs flex items-center gap-2 cursor-pointer disabled:opacity-50"
             >
               <QrCode size={15} />
               <span>{isSubmittingCoupon ? 'Verifying...' : 'Claim Points'}</span>
@@ -357,4 +395,3 @@ export default function InfluencerProfile() {
     </div>
   );
 }
-

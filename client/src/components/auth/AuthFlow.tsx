@@ -16,13 +16,22 @@ import { ApiError } from '../../lib/api/client';
 import { authApi, type AuthResult, type PublicRole, type AuthenticatedUser } from '../../lib/api/auth';
 import { useAuth } from '../../context/AuthContext';
 import { CustomDropdown } from '../ui/CustomDropdown';
+import { SearchableSelect, INDIAN_STATES_AND_UTS } from '../ui/SearchableSelect';
+import { motion } from 'motion/react';
 
 interface AuthFlowProps {
   onAuthenticated: (result: AuthResult) => void;
 }
 
+const AUTH_ROLES = [
+  { id: 'distributor', label: 'Distributor', icon: Building2, activeColor: 'text-slate-900', loginOnly: true },
+  { id: 'dealer', label: 'Dealer', icon: Store, activeColor: 'text-orange-600', loginOnly: false },
+  { id: 'retailer', label: 'Retailer', icon: Store, activeColor: 'text-emerald-600', loginOnly: false },
+  { id: 'influencer', label: 'Influencer', icon: Megaphone, activeColor: 'text-purple-600', loginOnly: false },
+  { id: 'customer', label: 'Customer', icon: UserCircle2, activeColor: 'text-blue-600', loginOnly: false },
+] as const;
+
 export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
-  const { loginDirect } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
   const [role, setRole] = useState<'distributor' | 'dealer' | 'retailer' | 'customer' | 'influencer'>('distributor');
   const [step, setStep] = useState(1);
@@ -31,8 +40,8 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
   const [errorMessage, setErrorMessage] = useState('');
 
   // Credentials
-  const [mobileNumber, setMobileNumber] = useState('9876543210');
-  const [password, setPassword] = useState('Distributor@123');
+  const [mobileNumber, setMobileNumber] = useState('');
+  const [password, setPassword] = useState('');
 
   // Distributor Specific
   const [companyName, setCompanyName] = useState('');
@@ -63,22 +72,22 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
   const [dealerList, setDealerList] = useState<Array<{ rawId: string; name: string }>>([]);
 
   useEffect(() => {
-    fetch('/api/sitesync/distributors')
+    fetch('/api/v1/auth/public-distributors')
       .then((r) => r.json())
       .then((j) => {
         if (j.success && Array.isArray(j.data)) {
-          const list = j.data.map((d: any) => ({ rawId: d.rawId || d.id, name: d.name || d.companyName }));
+          const list = j.data.map((d: any) => ({ rawId: d.distributor_id, name: d.company_name || d.owner_name }));
           setDistributorList(list);
           if (list.length > 0 && !distributorId) setDistributorId(list[0].rawId);
         }
       })
       .catch(() => {});
 
-    fetch('/api/sitesync/dealers')
+    fetch('/api/v1/auth/public-dealers')
       .then((r) => r.json())
       .then((j) => {
         if (j.success && Array.isArray(j.data)) {
-          const list = j.data.map((d: any) => ({ rawId: d.rawId || d.id, name: d.shopName || d.name }));
+          const list = j.data.map((d: any) => ({ rawId: d.dealer_id, name: d.shop_name || d.owner_name }));
           setDealerList(list);
           if (list.length > 0 && !dealerId) {
             setDealerId(list[0].rawId);
@@ -89,93 +98,11 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
       .catch(() => {});
   }, []);
 
-  // Quick Persona 1-click test handler with real database entities
-  const handleQuickDemoLogin = async (targetRole: 'distributor' | 'dealer' | 'retailer' | 'customer' | 'influencer') => {
-    setIsLoading(true);
-    setErrorMessage('');
-
-    // Real test credentials from Supabase database
-    const personaCredentials: Record<string, { mobile: string; fallback: AuthenticatedUser }> = {
-      distributor: {
-        mobile: '9876543210',
-        fallback: {
-          id: 'DIST-13EC',
-          role: 'distributor',
-          status: 'active',
-          company_name: 'North Zone Logistics Ltd',
-          owner_name: 'Rajesh Kumar',
-          name: 'Rajesh Kumar',
-          mobile_number: '9876543210',
-        },
-      },
-      dealer: {
-        mobile: '9825630003',
-        fallback: {
-          id: 'DLR-49F7',
-          role: 'dealer',
-          status: 'active',
-          shop_name: 'Metro Hardware 2563',
-          owner_name: 'Dealer Owner',
-          name: 'Metro Hardware 2563',
-          mobile_number: '9825630003',
-        },
-      },
-      retailer: {
-        mobile: '9812345679',
-        fallback: {
-          id: 'RET-BEFC',
-          role: 'retailer',
-          status: 'active',
-          shop_name: 'Mishra Hardware & Building Materials',
-          owner_name: 'Dhruv Mishra',
-          name: 'Dhruv Mishra',
-          mobile_number: '9812345679',
-        },
-      },
-      influencer: {
-        mobile: '9825630005',
-        fallback: {
-          id: 'INF-UAZJ39',
-          role: 'influencer',
-          status: 'active',
-          name: 'Engineer Raman 2563',
-          mobile_number: '9825630005',
-        },
-      },
-      customer: {
-        mobile: '9825630004',
-        fallback: {
-          id: 'CTR-SYXM5S',
-          role: 'customer',
-          status: 'active',
-          name: 'Customer Sharma 2563',
-          mobile_number: '9825630004',
-        },
-      },
-    };
-
-    const target = personaCredentials[targetRole];
-    setMobileNumber(target.mobile);
-    const targetPassword = targetRole === 'distributor' ? 'Distributor@123' : targetRole === 'dealer' || targetRole === 'retailer' ? 'Dealer@123' : targetRole === 'customer' ? 'Customer@123' : 'Influencer@123';
-    setPassword(targetPassword);
-    setRole(targetRole);
-
-    try {
-      const res = await authApi.signIn(targetRole, { mobileNumber: target.mobile, password: targetPassword });
-      if (res.data?.user) {
-        onAuthenticated(res);
-        setIsLoading(false);
-        return;
-      }
-    } catch {
-      // Graceful offline fallback
+  useEffect(() => {
+    if (!isLogin && role === 'distributor') {
+      setRole('dealer');
     }
-
-    setTimeout(() => {
-      loginDirect(target.fallback);
-      setIsLoading(false);
-    }, 150);
-  };
+  }, [isLogin, role]);
 
   const handleNext = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -205,9 +132,7 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
     }
 
     if (role === 'distributor') {
-      setErrorMessage(
-        'Distributor accounts are provisioned by enterprise system administration. Please sign in with your enterprise credentials.'
-      );
+      setRole('dealer');
       return;
     }
 
@@ -373,155 +298,37 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
                 )}
               </div>
 
-              {/* 1-Click Quick Demo Switcher */}
-              <div className="bg-slate-100/90 rounded-2xl p-4 border border-slate-200/80 space-y-2.5">
-                <div className="flex items-center justify-between text-xs font-bold text-slate-600 uppercase tracking-wider">
-                  <span className="flex items-center gap-1.5">
-                    <Sparkles size={13} className="text-orange-500" />
-                    1-Click Live Persona Sign-In (Real Database Accounts)
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleQuickDemoLogin('distributor')}
-                    className={`p-2.5 bg-white hover:bg-slate-50 text-slate-800 rounded-xl text-xs font-bold border transition-all text-left ${
-                      role === 'distributor' ? 'border-orange-500 ring-2 ring-orange-500/20' : 'border-slate-200 shadow-2xs'
-                    }`}
-                  >
-                    <span className="text-slate-900 block font-bold truncate">🏢 Distributor</span>
-                    <span className="text-[10px] text-slate-500 font-medium truncate block">North Zone Logistics</span>
-                    <span className="text-[9px] text-slate-400 font-mono">9876543210</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleQuickDemoLogin('dealer')}
-                    className={`p-2.5 bg-white hover:bg-slate-50 text-slate-800 rounded-xl text-xs font-bold border transition-all text-left ${
-                      role === 'dealer' ? 'border-orange-500 ring-2 ring-orange-500/20' : 'border-slate-200 shadow-2xs'
-                    }`}
-                  >
-                    <span className="text-slate-900 block font-bold truncate">🏬 Dealer (Wholesale)</span>
-                    <span className="text-[10px] text-slate-500 font-medium truncate block">Metro Hardware</span>
-                    <span className="text-[9px] text-slate-400 font-mono">9825630003</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleQuickDemoLogin('retailer')}
-                    className={`p-2.5 bg-white hover:bg-slate-50 text-slate-800 rounded-xl text-xs font-bold border transition-all text-left ${
-                      role === 'retailer' ? 'border-emerald-500 ring-2 ring-emerald-500/20' : 'border-slate-200 shadow-2xs'
-                    }`}
-                  >
-                    <span className="text-slate-900 block font-bold truncate">🏪 Retailer (Shop)</span>
-                    <span className="text-[10px] text-slate-500 font-medium truncate block">Mishra Hardware</span>
-                    <span className="text-[9px] text-slate-400 font-mono">9812345679</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleQuickDemoLogin('influencer')}
-                    className={`p-2.5 bg-white hover:bg-slate-50 text-slate-800 rounded-xl text-xs font-bold border transition-all text-left ${
-                      role === 'influencer' ? 'border-purple-500 ring-2 ring-purple-500/20' : 'border-slate-200 shadow-2xs'
-                    }`}
-                  >
-                    <span className="text-slate-900 block font-bold truncate">👷 Influencer</span>
-                    <span className="text-[10px] text-slate-500 font-medium truncate block">Er. Raman (Site Eng)</span>
-                    <span className="text-[9px] text-slate-400 font-mono">9825630005</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleQuickDemoLogin('customer')}
-                    className={`p-2.5 bg-white hover:bg-slate-50 text-slate-800 rounded-xl text-xs font-bold border transition-all text-left col-span-2 sm:col-span-1 ${
-                      role === 'customer' ? 'border-blue-500 ring-2 ring-blue-500/20' : 'border-slate-200 shadow-2xs'
-                    }`}
-                  >
-                    <span className="text-slate-900 block font-bold truncate">👥 Customer</span>
-                    <span className="text-[10px] text-slate-500 font-medium truncate block">Customer Sharma</span>
-                    <span className="text-[9px] text-slate-400 font-mono">9825630004</span>
-                  </button>
-                </div>
-              </div>
-
               {/* Role Selector */}
               {step === 1 && (
-                <div className="grid grid-cols-5 gap-1 bg-slate-100 p-1.5 rounded-2xl border border-slate-200/60">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRole('distributor');
-                      setMobileNumber('9876543210');
-                    }}
-                    className={`py-2 px-1 text-xs font-bold rounded-xl transition-all flex flex-col items-center gap-1 ${
-                      role === 'distributor'
-                        ? 'bg-white text-slate-900 shadow-xs border border-slate-200'
-                        : 'text-slate-500 hover:text-slate-800'
-                    }`}
-                  >
-                    <Building2 size={16} />
-                    <span className="truncate text-[11px]">Distributor</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRole('dealer');
-                      setMobileNumber('9825630003');
-                    }}
-                    className={`py-2 px-1 text-xs font-bold rounded-xl transition-all flex flex-col items-center gap-1 ${
-                      role === 'dealer'
-                        ? 'bg-white text-orange-600 shadow-xs border border-slate-200'
-                        : 'text-slate-500 hover:text-slate-800'
-                    }`}
-                  >
-                    <Store size={16} />
-                    <span className="truncate text-[11px]">Dealer</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRole('retailer');
-                      setMobileNumber('9812345679');
-                    }}
-                    className={`py-2 px-1 text-xs font-bold rounded-xl transition-all flex flex-col items-center gap-1 ${
-                      role === 'retailer'
-                        ? 'bg-white text-emerald-600 shadow-xs border border-slate-200'
-                        : 'text-slate-500 hover:text-slate-800'
-                    }`}
-                  >
-                    <Store size={16} />
-                    <span className="truncate text-[11px]">Retailer</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRole('influencer');
-                      setMobileNumber('9825630005');
-                    }}
-                    className={`py-2 px-1 text-xs font-bold rounded-xl transition-all flex flex-col items-center gap-1 ${
-                      role === 'influencer'
-                        ? 'bg-white text-purple-600 shadow-xs border border-slate-200'
-                        : 'text-slate-500 hover:text-slate-800'
-                    }`}
-                  >
-                    <Megaphone size={16} />
-                    <span className="truncate text-[11px]">Influencer</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRole('customer');
-                      setMobileNumber('9825630004');
-                    }}
-                    className={`py-2 px-1 text-xs font-bold rounded-xl transition-all flex flex-col items-center gap-1 ${
-                      role === 'customer'
-                        ? 'bg-white text-blue-600 shadow-xs border border-slate-200'
-                        : 'text-slate-500 hover:text-slate-800'
-                    }`}
-                  >
-                    <UserCircle2 size={16} />
-                    <span className="truncate text-[11px]">Customer</span>
-                  </button>
+                <div
+                  className={`grid ${
+                    isLogin ? 'grid-cols-5' : 'grid-cols-4'
+                  } gap-1 bg-slate-100/90 p-1.5 rounded-2xl border border-slate-200/70`}
+                >
+                  {AUTH_ROLES.filter((r) => !r.loginOnly || isLogin).map((r) => {
+                    const Icon = r.icon;
+                    const isActive = role === r.id;
+                    return (
+                      <button
+                        key={r.id}
+                        type="button"
+                        onClick={() => setRole(r.id as any)}
+                        className={`relative py-2 px-1 text-xs font-bold rounded-xl flex flex-col items-center justify-center gap-1 transition-colors duration-150 cursor-pointer outline-none focus:outline-none select-none border border-transparent ${
+                          isActive ? r.activeColor : 'text-slate-500 hover:text-slate-800'
+                        }`}
+                      >
+                        {isActive && (
+                          <motion.div
+                            layoutId="activeRoleIndicator"
+                            className="absolute inset-0 bg-white rounded-xl shadow-xs border border-slate-200/90"
+                            transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                          />
+                        )}
+                        <Icon size={16} className="relative z-10 shrink-0" />
+                        <span className="relative z-10 truncate text-[11px] font-bold">{r.label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
 
@@ -771,13 +578,12 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
                         <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                           State / UT *
                         </label>
-                        <input
-                          type="text"
-                          required
+                        <SearchableSelect
                           value={stateName}
-                          onChange={(e) => setStateName(e.target.value)}
-                          placeholder="e.g. Delhi"
-                          className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none"
+                          onChange={setStateName}
+                          options={INDIAN_STATES_AND_UTS}
+                          placeholder="Search or select state..."
+                          required
                         />
                       </div>
                       <div>
@@ -817,9 +623,13 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
                 <button
                   type="button"
                   onClick={() => {
-                    setIsLogin(!isLogin);
+                    const nextIsLogin = !isLogin;
+                    setIsLogin(nextIsLogin);
                     setStep(1);
                     setErrorMessage('');
+                    if (!nextIsLogin && role === 'distributor') {
+                      setRole('dealer');
+                    }
                   }}
                   className="text-xs text-slate-500 hover:text-slate-900 font-semibold"
                 >

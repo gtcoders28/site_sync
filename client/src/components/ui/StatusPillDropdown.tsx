@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown, Check } from 'lucide-react';
 
 export type StatusType = 'Active' | 'Pending' | 'Inactive' | string;
@@ -61,7 +62,9 @@ export function StatusPillDropdown({
   title = 'Click to update partner status',
 }: StatusPillDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [coords, setCoords] = useState<{ top: number; left: number; openUp: boolean } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const currentConfig = DEFAULT_CONFIGS[status] || {
     value: status,
@@ -73,37 +76,81 @@ export function StatusPillDropdown({
     hoverBg: 'hover:bg-slate-100',
   };
 
+  const updatePosition = useCallback(() => {
+    if (!buttonRef.current) return;
+    const rect = buttonRef.current.getBoundingClientRect();
+    const menuHeight = 120;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const openUp = spaceBelow < menuHeight + 15 && rect.top > menuHeight + 15;
+
+    const top = openUp ? rect.top - menuHeight - 6 : rect.bottom + 6;
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - 145));
+
+    setCoords({ top, left, openUp });
+  }, []);
+
+  const toggleDropdown = () => {
+    if (disabled) return;
+    if (!isOpen) {
+      updatePosition();
+      setIsOpen(true);
+    } else {
+      setIsOpen(false);
+    }
+  };
+
   useEffect(() => {
+    if (!isOpen) return;
+
     function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (
+        buttonRef.current &&
+        !buttonRef.current.contains(target) &&
+        menuRef.current &&
+        !menuRef.current.contains(target)
+      ) {
         setIsOpen(false);
       }
     }
 
-    if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [isOpen]);
-
-  useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === 'Escape') setIsOpen(false);
     }
-    if (isOpen) {
-      window.addEventListener('keydown', handleKeyDown);
+
+    function handleScrollOrResize() {
+      if (!buttonRef.current) {
+        setIsOpen(false);
+        return;
+      }
+      const rect = buttonRef.current.getBoundingClientRect();
+      if (rect.bottom < 0 || rect.top > window.innerHeight) {
+        setIsOpen(false);
+      } else {
+        updatePosition();
+      }
     }
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen]);
+
+    document.addEventListener('mousedown', handleClickOutside);
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('scroll', handleScrollOrResize, true);
+    window.addEventListener('resize', handleScrollOrResize);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('scroll', handleScrollOrResize, true);
+      window.removeEventListener('resize', handleScrollOrResize);
+    };
+  }, [isOpen, updatePosition]);
 
   return (
-    <div ref={dropdownRef} className={`relative inline-block text-left ${className}`}>
+    <div className={`relative inline-block text-left ${className}`}>
       <button
+        ref={buttonRef}
         type="button"
         disabled={disabled}
-        onClick={() => setIsOpen((prev) => !prev)}
+        onClick={toggleDropdown}
         title={title}
         className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border transition-all cursor-pointer select-none focus:outline-none focus:ring-2 focus:ring-orange-500/20 disabled:opacity-50 disabled:cursor-not-allowed ${currentConfig.pillBg} ${currentConfig.pillText} ${currentConfig.pillBorder} ${currentConfig.hoverBg}`}
       >
@@ -115,47 +162,61 @@ export function StatusPillDropdown({
         />
       </button>
 
-      {isOpen && (
-        <div className="absolute left-0 z-50 mt-1 min-w-[130px] bg-white rounded-xl border border-slate-200/90 shadow-xl py-1 text-xs font-semibold animate-in fade-in slide-in-from-top-1 duration-150">
-          <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100 mb-0.5">
-            Set Status
-          </div>
-          {options.map((opt) => {
-            const config = DEFAULT_CONFIGS[opt] || {
-              value: opt,
-              label: opt,
-              dotColor: 'bg-slate-500',
-              pillBg: '',
-              pillText: '',
-              pillBorder: '',
-              hoverBg: '',
-            };
-            const isSelected = opt === status;
+      {isOpen &&
+        coords &&
+        createPortal(
+          <div
+            ref={menuRef}
+            style={{
+              position: 'fixed',
+              top: `${coords.top}px`,
+              left: `${coords.left}px`,
+              zIndex: 9999,
+            }}
+            className={`min-w-[130px] bg-white rounded-xl border border-slate-200/90 shadow-2xl py-1 text-xs font-semibold animate-in fade-in duration-150 ${
+              coords.openUp ? 'slide-in-from-bottom-1' : 'slide-in-from-top-1'
+            }`}
+          >
+            <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100 mb-0.5">
+              Set Status
+            </div>
+            {options.map((opt) => {
+              const config = DEFAULT_CONFIGS[opt] || {
+                value: opt,
+                label: opt,
+                dotColor: 'bg-slate-500',
+                pillBg: '',
+                pillText: '',
+                pillBorder: '',
+                hoverBg: '',
+              };
+              const isSelected = opt === status;
 
-            return (
-              <button
-                key={opt}
-                type="button"
-                onClick={() => {
-                  onChange(opt);
-                  setIsOpen(false);
-                }}
-                className={`w-full text-left px-2.5 py-1.5 flex items-center justify-between gap-2 transition-colors cursor-pointer ${
-                  isSelected
-                    ? 'bg-slate-50 text-slate-900 font-bold'
-                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium'
-                }`}
-              >
-                <div className="flex items-center gap-1.5">
-                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${config.dotColor}`} />
-                  <span>{config.label}</span>
-                </div>
-                {isSelected && <Check size={13} className="text-orange-500 shrink-0" />}
-              </button>
-            );
-          })}
-        </div>
-      )}
+              return (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => {
+                    onChange(opt);
+                    setIsOpen(false);
+                  }}
+                  className={`w-full text-left px-2.5 py-1.5 flex items-center justify-between gap-2 transition-colors cursor-pointer ${
+                    isSelected
+                      ? 'bg-slate-50 text-slate-900 font-bold'
+                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${config.dotColor}`} />
+                    <span>{config.label}</span>
+                  </div>
+                  {isSelected && <Check size={13} className="text-orange-500 shrink-0" />}
+                </button>
+              );
+            })}
+          </div>,
+          document.body
+        )}
     </div>
   );
 }

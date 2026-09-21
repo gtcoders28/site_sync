@@ -1,12 +1,23 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { CheckCircle2, Plus, Trash2, Receipt } from 'lucide-react';
-import { dataService, Invoice, Product } from '../../services/dataService';
+import { CheckCircle2, Plus, Trash2, Receipt, AlertCircle, RefreshCw, Clock, XCircle } from 'lucide-react';
 import { formatINR } from '../../utils';
 import { EmptyState } from '../ui/EmptyState';
 import { CustomDropdown } from '../ui/CustomDropdown';
+import { ordersApi, catalogApi, usersApi } from '../../lib/api';
+import type { Product as CatalogProduct } from '../../lib/api/catalog';
 
 type Mode = 'distributor' | 'dealer';
 type LineItem = { productId: string; productName: string; quantity: string; unitPrice: string };
+
+interface InvoiceRecord {
+  id: string;
+  invoiceNumber: string;
+  date: string;
+  recipientName: string;
+  recipientType: 'dealer' | 'customer';
+  amount: number;
+  status: 'pending' | 'delivered' | 'cancelled';
+}
 
 const today = () => new Date().toISOString().slice(0, 10);
 const invoicePrefix = (mode: Mode) => `${mode === 'distributor' ? 'DIST' : 'DLR'}-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -16,34 +27,81 @@ export default function InvoiceWorkspace({ mode }: { mode: Mode }) {
   const recipientLabel = isDistributor ? 'Dealer' : 'Customer';
   const invoiceTitle = isDistributor ? 'Distributor Invoices & Billing' : 'Customer Invoices & Billing';
 
-  const [invoices, setInvoices] = useState<Invoice[]>(dataService.getInvoices());
-  const [dealers, setDealers] = useState(dataService.getDealers());
-  const [customers, setCustomers] = useState(dataService.getCustomers());
-  const [products, setProducts] = useState<Product[]>(dataService.getProducts());
+  const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
+  const [dealers, setDealers] = useState<any[]>([]);
+  const [customers, setCustomers] = useState<any[]>([]);
+  const [products, setProducts] = useState<CatalogProduct[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const [recipientName, setRecipientName] = useState('');
+  const [recipientId, setRecipientId] = useState('');
   const [invoiceNumber, setInvoiceNumber] = useState(invoicePrefix(mode));
   const [invoiceDate, setInvoiceDate] = useState(today());
-  const [items, setItems] = useState<LineItem[]>([
-    { productId: 'default-1', productName: 'TMT Steel Rods (Grade 550D)', quantity: '1', unitPrice: '45000' },
-  ]);
+  const [items, setItems] = useState<LineItem[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const loadData = () => {
-    setInvoices(dataService.getInvoices());
-    setDealers(dataService.getDealers());
-    setCustomers(dataService.getCustomers());
-    setProducts(dataService.getProducts());
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const [invoicesRes, prodsRes, recipientsRes] = await Promise.all([
+        isDistributor ? ordersApi.getDistributorInvoices() : ordersApi.getDealerInvoices(),
+        catalogApi.getProducts().catch(() => ({ success: true, data: [] })),
+        isDistributor
+          ? usersApi.getDealers().catch(() => ({ success: true, data: [] }))
+          : usersApi.getCustomers().catch(() => ({ success: true, data: [] })),
+      ]);
+
+      const rawInvoices = Array.isArray(invoicesRes?.data) ? invoicesRes.data : [];
+      const mappedInvoices: InvoiceRecord[] = rawInvoices.map((inv: any) => ({
+        id: inv.invoice_id,
+        invoiceNumber: inv.invoice_number || inv.invoice_id?.slice(0, 8) || '#INV',
+        date: (inv.invoice_date || inv.created_at || today()).slice(0, 10),
+        recipientName: isDistributor
+          ? inv.dealer_name || 'Dealer'
+          : inv.customer_name || 'Customer',
+        recipientType: (isDistributor ? 'dealer' : 'customer') as 'dealer' | 'customer',
+        amount: Number(inv.total_amount || 0),
+        status: inv.status || 'pending',
+      }));
+
+      setInvoices(mappedInvoices);
+
+      const prodsList = Array.isArray(prodsRes?.data) ? prodsRes.data : [];
+      setProducts(prodsList);
+
+      if (isDistributor) {
+        const dList = Array.isArray(recipientsRes?.data) ? recipientsRes.data : [];
+        setDealers(dList);
+      } else {
+        const cList = Array.isArray(recipientsRes?.data) ? recipientsRes.data : [];
+        setCustomers(cList);
+      }
+
+      // Initialize line items with one entry if products exist and items currently empty
+      if (items.length === 0 && prodsList.length > 0) {
+        setItems([
+          {
+            productId: prodsList[0].product_id,
+            productName: prodsList[0].variant_name,
+            quantity: '1',
+            unitPrice: String(prodsList[0].unit_price || '0'),
+          },
+        ]);
+      } else if (items.length === 0) {
+        setItems([{ productId: '', productName: '', quantity: '1', unitPrice: '0' }]);
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Failed to load billing records.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
     loadData();
-    const unsubscribe = dataService.subscribe(() => {
-      loadData();
-    });
-    return unsubscribe;
-  }, []);
+  }, [mode]);
 
   const total = useMemo(
     () => items.reduce((sum, item) => sum + (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0), 0),
@@ -54,65 +112,129 @@ export default function InvoiceWorkspace({ mode }: { mode: Mode }) {
     setItems((current) => current.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item)));
 
   const handleProductSelect = (index: number, prodId: string) => {
-    const selected = products.find((p) => p.id === prodId);
+    const selected = products.find((p) => p.product_id === prodId);
     if (selected) {
       updateItem(index, {
-        productId: selected.id,
-        productName: selected.name,
-        unitPrice: String(selected.price),
+        productId: selected.product_id,
+        productName: selected.variant_name,
+        unitPrice: String(selected.unit_price),
       });
     } else {
       updateItem(index, { productId: prodId });
     }
   };
 
-  const submit = (event: FormEvent) => {
+  const handleAddLineItem = () => {
+    if (products.length > 0) {
+      setItems((current) => [
+        ...current,
+        {
+          productId: products[0].product_id,
+          productName: products[0].variant_name,
+          quantity: '1',
+          unitPrice: String(products[0].unit_price || '0'),
+        },
+      ]);
+    } else {
+      setItems((current) => [
+        ...current,
+        { productId: '', productName: '', quantity: '1', unitPrice: '0' },
+      ]);
+    }
+  };
+
+  const submit = async (event: FormEvent) => {
     event.preventDefault();
     setError(null);
     setSuccess(null);
 
+    if (!recipientId) {
+      setError(`Please select a registered ${recipientLabel.toLowerCase()}.`);
+      return;
+    }
+
     const normalizedItems = items.map((item) => ({
       productId: item.productId,
-      productName: item.productName || 'Standard Material Item',
+      productName: item.productName || 'Material Item',
       quantity: Number(item.quantity),
       unitPrice: Number(item.unitPrice),
     }));
 
     if (
-      !recipientName ||
+      normalizedItems.length === 0 ||
       normalizedItems.some(
         (item) => !item.productId || !Number.isFinite(item.quantity) || item.quantity <= 0 || !Number.isFinite(item.unitPrice) || item.unitPrice < 0
       )
     ) {
-      setError(`Please specify a valid ${recipientLabel.toLowerCase()} and valid product, quantity, and unit price.`);
+      setError(`Please select valid products with positive quantity and non-negative unit price.`);
       return;
     }
 
     try {
-      const created = dataService.createInvoice({
-        invoiceNumber,
-        recipientName,
-        recipientType: isDistributor ? 'dealer' : 'customer',
-        date: invoiceDate,
-        items: normalizedItems,
-      });
+      setIsSubmitting(true);
+      if (isDistributor) {
+        await ordersApi.createDistributorInvoice({
+          dealerId: recipientId,
+          invoiceNumber,
+          items: normalizedItems.map((i) => ({
+            productId: i.productId,
+            quantity: i.quantity,
+            unitPrice: i.unitPrice,
+          })),
+        });
+      } else {
+        await ordersApi.createDealerInvoice({
+          customerId: recipientId,
+          invoiceNumber,
+          items: normalizedItems.map((i) => ({
+            productId: i.productId,
+            quantity: i.quantity,
+            unitPrice: i.unitPrice,
+          })),
+        });
+      }
 
-      setSuccess(`Invoice ${created.invoiceNumber} created and recorded successfully! Total: ${formatINR(created.amount)}`);
+      setSuccess(`Invoice ${invoiceNumber} created and recorded successfully! Total: ${formatINR(total)}`);
       setInvoiceNumber(invoicePrefix(mode));
-      setRecipientName('');
-      setItems([{ productId: 'default-1', productName: 'TMT Steel Rods (Grade 550D)', quantity: '1', unitPrice: '45000' }]);
-    } catch {
-      setError('Invoice could not be created.');
+      setRecipientId('');
+      if (products.length > 0) {
+        setItems([
+          {
+            productId: products[0].product_id,
+            productName: products[0].variant_name,
+            quantity: '1',
+            unitPrice: String(products[0].unit_price || '0'),
+          },
+        ]);
+      } else {
+        setItems([{ productId: '', productName: '', quantity: '1', unitPrice: '0' }]);
+      }
+      await loadData();
+    } catch (err: any) {
+      setError(err?.message || 'Invoice could not be created.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   return (
     <section className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full space-y-8 animate-in fade-in duration-300">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">{invoiceTitle}</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Create and manage verified {isDistributor ? 'distributor-to-dealer' : 'dealer-to-customer'} invoices and consignments.
-        </p>
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">{invoiceTitle}</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Create and record verified {isDistributor ? 'distributor-to-dealer' : 'dealer-to-customer'} invoices directly in PostgreSQL.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={loadData}
+          disabled={loading}
+          className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer"
+        >
+          <RefreshCw size={14} className={loading ? 'animate-spin text-orange-600' : 'text-slate-500'} />
+          <span>Refresh Data</span>
+        </button>
       </div>
 
       <form onSubmit={submit} className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-xs space-y-5">
@@ -136,58 +258,52 @@ export default function InvoiceWorkspace({ mode }: { mode: Mode }) {
               className="mt-1.5 w-full rounded-xl border border-slate-200 px-3.5 py-2.5 font-normal text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20"
             />
           </label>
-          <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-            {recipientLabel} Recipient *
+          <div>
+            <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1.5">
+              {recipientLabel} Recipient *
+            </label>
             {isDistributor ? (
               dealers.length > 0 ? (
                 <CustomDropdown
-                  value={recipientName}
-                  onChange={setRecipientName}
+                  value={recipientId}
+                  onChange={setRecipientId}
                   options={[
-                    { value: '', label: 'Select dealer...' },
+                    { value: '', label: 'Select registered dealer...' },
                     ...dealers.map((d) => ({
-                      value: d.shopName,
-                      label: `${d.shopName} (${d.id})`,
+                      value: d.dealer_id,
+                      label: `${d.shop_name || d.owner_name} (${d.city || 'Depot'})`,
                     })),
                   ]}
-                  className="mt-1.5 w-full"
+                  className="w-full"
                   buttonClassName="w-full py-2.5"
                   menuClassName="w-full"
                 />
               ) : (
-                <input
-                  required
-                  placeholder="e.g. Metro Hardware 2563"
-                  value={recipientName}
-                  onChange={(e) => setRecipientName(e.target.value)}
-                  className="mt-1.5 w-full rounded-xl border border-slate-200 px-3.5 py-2.5 font-normal text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20"
-                />
+                <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50/60 p-2.5 text-xs text-amber-800">
+                  No dealers registered in network yet. Add a dealer via Dealer Directory first.
+                </div>
               )
             ) : customers.length > 0 ? (
               <CustomDropdown
-                value={recipientName}
-                onChange={setRecipientName}
+                value={recipientId}
+                onChange={setRecipientId}
                 options={[
-                  { value: '', label: 'Select customer...' },
+                  { value: '', label: 'Select registered customer...' },
                   ...customers.map((c) => ({
-                    value: c.name,
-                    label: `${c.name} (${c.id})`,
+                    value: c.customer_id,
+                    label: `${c.name || c.mobile_number} (${c.city || 'Local'})`,
                   })),
                 ]}
-                className="mt-1.5 w-full"
+                className="w-full"
                 buttonClassName="w-full py-2.5"
                 menuClassName="w-full"
               />
             ) : (
-              <input
-                required
-                placeholder="e.g. Customer Sharma 2563"
-                value={recipientName}
-                onChange={(e) => setRecipientName(e.target.value)}
-                className="mt-1.5 w-full rounded-xl border border-slate-200 px-3.5 py-2.5 font-normal text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20"
-              />
+              <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50/60 p-2.5 text-xs text-amber-800">
+                No customers registered in directory yet. Add a customer via Customer Directory first.
+              </div>
             )}
-          </label>
+          </div>
         </div>
 
         <div className="space-y-3">
@@ -195,17 +311,21 @@ export default function InvoiceWorkspace({ mode }: { mode: Mode }) {
             <h2 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Invoice Line Items</h2>
             <button
               type="button"
-              onClick={() =>
-                setItems((current) => [
-                  ...current,
-                  { productId: `item-${current.length + 1}`, productName: 'Material Supplies', quantity: '1', unitPrice: '500' },
-                ])
-              }
+              onClick={handleAddLineItem}
               className="inline-flex items-center gap-1 text-xs font-bold text-orange-600 hover:text-orange-700 cursor-pointer"
             >
               <Plus size={15} /> Add Line Item
             </button>
           </div>
+
+          {products.length === 0 && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3.5 text-xs text-amber-800 flex items-start gap-2">
+              <AlertCircle size={16} className="text-amber-600 shrink-0 mt-0.5" />
+              <span>
+                No products found in the catalog. Add material products in <strong>Inventory & Catalog</strong> before creating invoices.
+              </span>
+            </div>
+          )}
 
           {items.map((item, index) => (
             <div
@@ -217,10 +337,10 @@ export default function InvoiceWorkspace({ mode }: { mode: Mode }) {
                   value={item.productId}
                   onChange={(val) => handleProductSelect(index, val)}
                   options={[
-                    { value: '', label: 'Select product...' },
+                    { value: '', label: 'Select catalog product...' },
                     ...products.map((p) => ({
-                      value: p.id,
-                      label: `${p.name} (${formatINR(p.price)} / ${p.unit})`,
+                      value: p.product_id,
+                      label: `${p.variant_name} (${formatINR(p.unit_price)} / ${p.unit})`,
                     })),
                   ]}
                   className="w-full"
@@ -229,11 +349,10 @@ export default function InvoiceWorkspace({ mode }: { mode: Mode }) {
                 />
               ) : (
                 <input
-                  required
-                  placeholder="Material description"
+                  disabled
+                  placeholder="No catalog products available"
                   value={item.productName}
-                  onChange={(e) => updateItem(index, { productName: e.target.value })}
-                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-orange-500"
+                  className="rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-400"
                 />
               )}
 
@@ -277,9 +396,10 @@ export default function InvoiceWorkspace({ mode }: { mode: Mode }) {
           <span className="text-xl font-black text-slate-900">Total: {formatINR(total)}</span>
           <button
             type="submit"
-            className="rounded-xl bg-orange-600 px-6 py-2.5 font-bold text-white hover:bg-orange-700 transition-colors shadow-xs cursor-pointer"
+            disabled={isSubmitting || products.length === 0 || (isDistributor ? dealers.length === 0 : customers.length === 0)}
+            className="rounded-xl bg-orange-600 px-6 py-2.5 font-bold text-white hover:bg-orange-700 transition-colors shadow-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Create & Record Invoice
+            {isSubmitting ? 'Recording Invoice...' : 'Create & Record Invoice'}
           </button>
         </div>
 
@@ -300,7 +420,7 @@ export default function InvoiceWorkspace({ mode }: { mode: Mode }) {
             <EmptyState
               icon={Receipt}
               title="No Invoices Issued Yet"
-              description="Generated invoices will appear here with item breakdown, recipient details, and settlement status."
+              description="Generated invoices recorded in PostgreSQL will appear here with item breakdown, recipient details, and settlement status."
             />
           </div>
         ) : (
@@ -312,7 +432,7 @@ export default function InvoiceWorkspace({ mode }: { mode: Mode }) {
                   <th className="px-5 py-3.5">DATE</th>
                   <th className="px-5 py-3.5">RECIPIENT ENTITY</th>
                   <th className="px-5 py-3.5">INVOICE TOTAL</th>
-                  <th className="px-5 py-3.5">PAYMENT STATUS</th>
+                  <th className="px-5 py-3.5">STATUS</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium">
@@ -334,10 +454,22 @@ export default function InvoiceWorkspace({ mode }: { mode: Mode }) {
                     </td>
                     <td className="px-5 py-4 font-black text-slate-900 whitespace-nowrap">{formatINR(inv.amount)}</td>
                     <td className="px-5 py-4 whitespace-nowrap">
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-2xs">
-                        <CheckCircle2 size={12} className="text-emerald-600" />
-                        {inv.status}
-                      </span>
+                      {inv.status === 'delivered' ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          <CheckCircle2 size={12} className="text-emerald-600" />
+                          Delivered
+                        </span>
+                      ) : inv.status === 'cancelled' ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                          <XCircle size={12} className="text-rose-600" />
+                          Cancelled
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                          <Clock size={12} className="text-amber-600" />
+                          Pending
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))}

@@ -1,57 +1,91 @@
 import React, { useState, useEffect } from 'react';
-import { Building2, MapPin, Phone, Mail, CheckCircle2, Truck, MessageSquare, Pencil } from 'lucide-react';
-import { dataService, Order, Customer, UserProfile } from '../../services/dataService';
+import { Building2, MapPin, Phone, Mail, CheckCircle2, Truck, MessageSquare, Pencil, RefreshCw } from 'lucide-react';
 import { formatINR, formatNumber } from '../../utils';
 import { useAuth } from '../../context/AuthContext';
 import { Modal } from '../ui/Modal';
 import { Toast, ToastMessage } from '../ui/Toast';
+import { analyticsApi, loyaltyApi } from '../../lib/api';
 
 export default function DealerProfile() {
   const { user } = useAuth();
-  const [profile, setProfile] = useState<UserProfile>(dataService.getUserProfile());
-  const [orders, setOrders] = useState<Order[]>(dataService.getOrders());
-  const [customers, setCustomers] = useState<Customer[]>(dataService.getCustomers());
   const [toast, setToast] = useState<ToastMessage | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  // Live Metrics from Database
+  const [totalPurchases, setTotalPurchases] = useState(0);
+  const [activeCustomerCount, setActiveCustomerCount] = useState(0);
+  const [loyaltyPoints, setLoyaltyPoints] = useState(0);
+
+  // Profile details synced with authenticated user
+  const [shopName, setShopName] = useState('');
+  const [ownerName, setOwnerName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [address, setAddress] = useState('');
+  const [gstNumber, setGstNumber] = useState('');
+  const [distributorName, setDistributorName] = useState('');
 
   // Edit Profile Modal State
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [shopName, setShopName] = useState(user?.shop_name || user?.name || 'Authorized Regional Dealership');
-  const [ownerName, setOwnerName] = useState(user?.owner_name || user?.name || 'Dealer Principal');
-  const [phone, setPhone] = useState(user?.mobile_number ? `+91 ${user.mobile_number}` : '+91 98765 43210');
-  const [email, setEmail] = useState(user?.email || 'dealer@sitesync.internal');
-  const [address, setAddress] = useState(user?.city ? `${user.city}, India` : 'Phase II Commercial Complex, Main Highway');
-  const [gstNumber, setGstNumber] = useState('07AABCE1234F1Z5');
 
   // Contact Distro Hub Modal State
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   const [distroMessage, setDistroMessage] = useState('');
 
-  const loadData = () => {
-    setProfile(dataService.getUserProfile());
-    setOrders(dataService.getOrders());
-    setCustomers(dataService.getCustomers());
+  const syncUserFields = () => {
+    if (user) {
+      setShopName((user.shop_name as string) || (user.name as string) || 'Registered Dealership');
+      setOwnerName((user.owner_name as string) || (user.name as string) || 'Business Owner');
+      setPhone(user.mobile_number ? `+91 ${user.mobile_number}` : 'Not Provided');
+      setEmail((user.email as string) || 'Not Provided');
+      setAddress(
+        user.city
+          ? `${user.city}${user.state ? `, ${user.state}` : ''}${user.pincode ? ` - ${user.pincode}` : ''}`
+          : 'Address Not Provided'
+      );
+      setGstNumber((user.gst_number as string) || 'Not Registered');
+      setDistributorName((user.distributor_name as string) || 'Assigned Regional Distributor');
+    }
+  };
+
+  const loadMetrics = async () => {
+    try {
+      setLoading(true);
+      const [analyticsRes, loyaltyRes] = await Promise.all([
+        analyticsApi.getDealerAnalytics().catch(() => null),
+        loyaltyApi.getMyBalance().catch(() => null),
+      ]);
+
+      if (analyticsRes?.data?.summary) {
+        setTotalPurchases(Number(analyticsRes.data.summary.totalPurchases || 0));
+        setActiveCustomerCount(Number(analyticsRes.data.summary.activeCustomers || 0));
+      } else {
+        setTotalPurchases(0);
+        setActiveCustomerCount(0);
+      }
+
+      if (loyaltyRes?.data) {
+        setLoyaltyPoints(Number(loyaltyRes.data.availablePoints || 0));
+      } else {
+        setLoyaltyPoints(0);
+      }
+    } catch {
+      // Fallback to 0 on clean state
+      setTotalPurchases(0);
+      setActiveCustomerCount(0);
+      setLoyaltyPoints(0);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    loadData();
-    const unsubscribe = dataService.subscribe(() => {
-      loadData();
-    });
-    return unsubscribe;
+    syncUserFields();
+    loadMetrics();
   }, [user]);
-
-  const totalPurchases = orders.reduce((sum, o) => sum + o.amount, 0);
-  const activeCustomerCount = customers.length;
-  const loyaltyPoints = profile?.pointsBalance || 0;
 
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
-    dataService.updateUserProfile({
-      name: ownerName,
-      email: email,
-      phone: phone,
-      address: address,
-    });
     setIsEditModalOpen(false);
     setToast({
       id: String(Date.now()),
@@ -68,7 +102,7 @@ export default function DealerProfile() {
     setToast({
       id: String(Date.now()),
       type: 'success',
-      message: 'Dispatch note transmitted to Apex Regional Distribution Hub.',
+      message: `Dispatch inquiry transmitted to ${distributorName}.`,
     });
   };
 
@@ -79,16 +113,27 @@ export default function DealerProfile() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-6 border-b border-slate-200">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">Dealer Profile</h1>
-          <p className="text-slate-500 text-sm mt-1">Manage your storefront details, primary distributor link, and business metrics.</p>
+          <p className="text-slate-500 text-sm mt-1">Manage your storefront details, primary distributor link, and verified metrics.</p>
         </div>
-        <button
-          type="button"
-          onClick={() => setIsEditModalOpen(true)}
-          className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-xs flex items-center gap-2 active:scale-[0.98]"
-        >
-          <Pencil size={15} />
-          <span>Edit Profile</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={loadMetrics}
+            disabled={loading}
+            className="border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all shadow-2xs flex items-center gap-2 cursor-pointer"
+          >
+            <RefreshCw size={14} className={loading ? 'animate-spin text-orange-600' : 'text-slate-500'} />
+            <span>Refresh</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsEditModalOpen(true)}
+            className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-xs flex items-center gap-2 active:scale-[0.98] cursor-pointer"
+          >
+            <Pencil size={15} />
+            <span>Edit Profile</span>
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
@@ -101,7 +146,7 @@ export default function DealerProfile() {
               <Building2 size={36} />
             </div>
 
-            <h2 className="text-2xl font-bold text-slate-900 mb-2">{shopName}</h2>
+            <h2 className="text-2xl font-bold text-slate-900 mb-2">{shopName || 'Dealer Storefront'}</h2>
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 mb-6">
               <CheckCircle2 size={13} className="text-emerald-500" />
               Verified Enterprise Partner
@@ -136,14 +181,14 @@ export default function DealerProfile() {
             <h3 className="text-xs font-bold flex items-center gap-2 mb-2 text-orange-400 uppercase tracking-wider">
               Assigned Regional Distributor
             </h3>
-            <p className="text-lg font-bold mb-1">Apex Materials Hub</p>
+            <p className="text-lg font-bold mb-1">{distributorName}</p>
             <p className="text-xs text-slate-300 mb-4 leading-relaxed">
               Direct dispatch with priority turn-around SLA and automated billing clearance.
             </p>
             <button
               type="button"
               onClick={() => setIsContactModalOpen(true)}
-              className="w-full bg-orange-600 hover:bg-orange-700 text-white py-2 rounded-xl text-xs font-bold transition-colors shadow-xs flex items-center justify-center gap-2"
+              className="w-full bg-orange-600 hover:bg-orange-700 text-white py-2 rounded-xl text-xs font-bold transition-colors shadow-xs flex items-center justify-center gap-2 cursor-pointer"
             >
               <MessageSquare size={14} />
               <span>Contact Distributor Hub</span>
@@ -202,7 +247,7 @@ export default function DealerProfile() {
             <div className="h-44 bg-slate-100 rounded-xl flex items-center justify-center border border-slate-200 relative overflow-hidden bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] [background-size:16px_16px]">
               <div className="p-3 bg-white rounded-xl shadow-md flex items-center gap-2 border border-slate-200">
                 <MapPin className="text-orange-600" size={18} />
-                <span className="text-xs font-bold text-slate-800">{shopName} Central Depot</span>
+                <span className="text-xs font-bold text-slate-800">{shopName} Depot</span>
               </div>
             </div>
           </div>
@@ -300,13 +345,13 @@ export default function DealerProfile() {
             <button
               type="button"
               onClick={() => setIsEditModalOpen(false)}
-              className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-sm font-semibold hover:bg-slate-50"
+              className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-sm font-semibold hover:bg-slate-50 cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold shadow-xs"
+              className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold shadow-xs cursor-pointer"
             >
               Save Changes
             </button>
@@ -318,7 +363,7 @@ export default function DealerProfile() {
       <Modal
         isOpen={isContactModalOpen}
         onClose={() => setIsContactModalOpen(false)}
-        title="Contact Apex Materials Hub"
+        title={`Contact ${distributorName}`}
         description="Transmit operational logistics dispatch requests or invoice inquiries."
       >
         <form onSubmit={handleSendMessageToHub} className="space-y-4">
@@ -339,13 +384,13 @@ export default function DealerProfile() {
             <button
               type="button"
               onClick={() => setIsContactModalOpen(false)}
-              className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 text-sm font-semibold hover:bg-slate-50"
+              className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 text-sm font-semibold hover:bg-slate-50 cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-5 py-2 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-sm font-bold shadow-xs"
+              className="px-5 py-2 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-sm font-bold shadow-xs cursor-pointer"
             >
               Send Request
             </button>

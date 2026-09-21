@@ -6,6 +6,7 @@ import { Toast, ToastMessage } from '../ui/Toast';
 import { EmptyState } from '../ui/EmptyState';
 import { CustomDropdown } from '../ui/CustomDropdown';
 import { useAuth } from '../../context/AuthContext';
+import { ordersApi, catalogApi, usersApi } from '../../lib/api';
 
 export interface WholesaleOrder {
   id: string;
@@ -41,6 +42,8 @@ export default function OrdersManagement() {
   const { user } = useAuth();
   const [orders, setOrders] = useState<WholesaleOrder[]>([]);
   const [catalogProducts, setCatalogProducts] = useState<CatalogProduct[]>([]);
+  const [dealers, setDealers] = useState<any[]>([]);
+  const [selectedDealerId, setSelectedDealerId] = useState('');
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -49,7 +52,7 @@ export default function OrdersManagement() {
   const [isPlaceOrderModalOpen, setIsPlaceOrderModalOpen] = useState(false);
   const [toast, setToast] = useState<ToastMessage | null>(null);
 
-  // New Wholesale Order Form State (for Dealer)
+  // New Wholesale Order Form State (for Dealer/Distributor)
   const [orderCategory, setOrderCategory] = useState<'Cement' | 'TMT Steel Rebar'>('Cement');
   const [selectedProductRawId, setSelectedProductRawId] = useState('');
   const [orderQuantity, setOrderQuantity] = useState('100');
@@ -64,22 +67,72 @@ export default function OrdersManagement() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [ordersRes, prodsRes] = await Promise.all([
-        fetch('/api/sitesync/orders'),
-        fetch('/api/sitesync/products'),
+      const [invoicesRes, prodsRes, dealersRes] = await Promise.all([
+        isDistributor ? ordersApi.getDistributorInvoices() : ordersApi.getDistributorInvoices(),
+        catalogApi.getProducts(),
+        usersApi.getDealers().catch(() => ({ success: true, data: [] })),
       ]);
 
-      const [ordersJson, prodsJson] = await Promise.all([ordersRes.json(), prodsRes.json()]);
-
-      if (ordersJson.success && Array.isArray(ordersJson.data)) {
-        setOrders(ordersJson.data);
-      }
-      if (prodsJson.success && Array.isArray(prodsJson.data)) {
-        setCatalogProducts(prodsJson.data);
-        if (!selectedProductRawId && prodsJson.data.length > 0) {
-          const firstCement = prodsJson.data.find((p: CatalogProduct) => p.category.includes('Cement')) || prodsJson.data[0];
-          setSelectedProductRawId(firstCement.rawId);
+      const rawInvoices = Array.isArray(invoicesRes?.data) ? invoicesRes.data : [];
+      const mappedOrders: WholesaleOrder[] = rawInvoices.map((inv: any) => {
+        const rawStatus = (inv.status || 'pending').toLowerCase();
+        let uiStatus: WholesaleOrder['status'] = 'Processing';
+        let dbStatus: WholesaleOrder['dbStatus'] = 'pending';
+        if (rawStatus === 'delivered') {
+          uiStatus = 'Delivered';
+          dbStatus = 'delivered';
+        } else if (rawStatus === 'cancelled') {
+          uiStatus = 'Cancelled';
+          dbStatus = 'cancelled';
+        } else if (rawStatus === 'dispatched' || rawStatus === 'in transit') {
+          uiStatus = 'In Transit';
+          dbStatus = 'dispatched';
         }
+
+        return {
+          id: inv.invoice_number || inv.invoice_id?.slice(0, 8) || '#INV',
+          rawId: inv.invoice_id,
+          product: inv.dealer_name ? `Material Consignment: ${inv.dealer_name}` : 'Wholesale Material Consignment',
+          quantity: 'Full Consignment',
+          dealer: inv.dealer_name || inv.distributor_name || 'Authorized Regional Partner',
+          dealerId: inv.dealer_id,
+          distributorId: inv.distributor_id,
+          amount: Number(inv.total_amount || 0),
+          status: uiStatus,
+          dbStatus,
+          date: inv.invoice_date
+            ? new Date(inv.invoice_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+            : 'Recent',
+          dispatchedAt: inv.created_at ? new Date(inv.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : undefined,
+          pointsEarned: Math.round(Number(inv.total_amount || 0) * 0.01),
+          canAccept: isDistributor && dbStatus === 'pending',
+          canConfirmDelivery: (isDistributor || isDealer) && (dbStatus === 'pending' || dbStatus === 'dispatched'),
+          deliveredAt: inv.delivered_at ? new Date(inv.delivered_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : undefined,
+        };
+      });
+
+      setOrders(mappedOrders);
+
+      const rawProds = Array.isArray(prodsRes?.data) ? prodsRes.data : [];
+      const mappedProds: CatalogProduct[] = rawProds.map((p: any) => ({
+        id: p.product_id?.slice(0, 8) || 'PRD',
+        rawId: p.product_id,
+        name: p.variant_name || 'Standard Material',
+        category: p.category_name || 'General Materials',
+        brand: p.brand_name || 'Approved Brand',
+        unit: p.unit || 'units',
+        price: Number(p.unit_price || 0),
+        grade: p.attributes?.grade || 'Standard Grade',
+      }));
+      setCatalogProducts(mappedProds);
+      if (!selectedProductRawId && mappedProds.length > 0) {
+        setSelectedProductRawId(mappedProds[0].rawId);
+      }
+
+      const rawDealers = Array.isArray(dealersRes?.data) ? dealersRes.data : [];
+      setDealers(rawDealers);
+      if (rawDealers.length > 0 && !selectedDealerId) {
+        setSelectedDealerId(rawDealers[0].dealer_id);
       }
     } catch (err) {
       console.error('Failed to load orders or products:', err);
@@ -90,7 +143,7 @@ export default function OrdersManagement() {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [user?.role]);
 
   const handlePlaceWholesaleOrder = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -106,39 +159,40 @@ export default function OrdersManagement() {
       return;
     }
 
+    const targetDealer = user?.dealerId || selectedDealerId || (dealers.length > 0 ? dealers[0].dealer_id : null);
+    if (!targetDealer) {
+      setToast({ id: String(Date.now()), type: 'error', message: 'Please select or onboard a dealer first.' });
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      const resp = await fetch('/api/sitesync/orders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          dealerId: user?.rawId || user?.dealerId || null,
-          distributorId: user?.distributorId || null,
-          productId: prod.rawId,
-          quantity: qty,
-          unitPrice: prod.price,
-          notes: orderNotes.trim(),
-        }),
+      const invNumber = `INV-${Math.floor(100000 + Math.random() * 900000)}`;
+      await ordersApi.createDistributorInvoice({
+        dealerId: targetDealer,
+        invoiceNumber: invNumber,
+        items: [
+          {
+            productId: prod.rawId,
+            quantity: qty,
+            unitPrice: prod.price,
+          },
+        ],
       });
-
-      const json = await resp.json();
-      if (!resp.ok || !json.success) {
-        throw new Error(json.message || 'Failed to place wholesale order.');
-      }
 
       setIsPlaceOrderModalOpen(false);
       await loadData();
       setToast({
         id: String(Date.now()),
         type: 'success',
-        message: json.message || `Order ${json.data?.id} submitted to distributor successfully!`,
+        message: `Order invoice ${invNumber} submitted to database successfully!`,
       });
     } catch (err: any) {
       console.error('Error placing order:', err);
       setToast({
         id: String(Date.now()),
         type: 'error',
-        message: err.message || 'Failed to submit order.',
+        message: err.message || 'Failed to submit order. Check stock availability in warehouse.',
       });
     } finally {
       setIsSubmitting(false);
@@ -146,42 +200,16 @@ export default function OrdersManagement() {
   };
 
   const handleAcceptOrder = async (order: WholesaleOrder) => {
-    setAcceptingOrderId(order.id);
-    const dispatchTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-    // Optimistic reactive update: transition order immediately to Dispatched / In Transit
-    setOrders((prev) =>
-      prev.map((o) =>
-        o.id === order.id
-          ? {
-              ...o,
-              status: 'In Transit',
-              dbStatus: 'dispatched',
-              canAccept: false,
-              canConfirmDelivery: true,
-              dispatchedAt: dispatchTime,
-            }
-          : o
-      )
-    );
-
+    setAcceptingOrderId(order.rawId);
     try {
-      const resp = await fetch(`/api/sitesync/orders/${order.id}/accept`, {
-        method: 'POST',
-      });
-
-      const json = await resp.json();
-      if (!resp.ok || !json.success) {
-        throw new Error(json.message || 'Failed to accept order.');
-      }
-
+      await ordersApi.updateDistributorInvoiceStatus(order.rawId, 'delivered');
       setToast({
         id: String(Date.now()),
         type: 'success',
-        message: `Order ${order.id} accepted & dispatched at ${dispatchTime}! Stock subtracted from warehouse; awaiting recipient delivery confirmation.`,
+        message: `Order ${order.id} accepted & fulfilled! Stock updated in live database.`,
       });
-      // Switch active tab to 'dispatched' so user sees it right away!
-      setActiveTab('dispatched');
+      await loadData();
+      setActiveTab('delivered');
     } catch (err: any) {
       console.error('Error accepting order:', err);
       setToast({
@@ -189,52 +217,22 @@ export default function OrdersManagement() {
         type: 'error',
         message: err.message || 'Failed to accept order.',
       });
-      await loadData();
     } finally {
       setAcceptingOrderId(null);
     }
   };
 
   const handleConfirmDelivery = async (order: WholesaleOrder) => {
-    setDeliveringOrderId(order.id);
-    const deliveredTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-    // Optimistic reactive update: transition order to Delivered and credit inventory
-    setOrders((prev) =>
-      prev.map((o) =>
-        o.id === order.id
-          ? {
-              ...o,
-              status: 'Delivered',
-              dbStatus: 'delivered',
-              canConfirmDelivery: false,
-              deliveredAt: deliveredTime,
-            }
-          : o
-      )
-    );
-
+    setDeliveringOrderId(order.rawId);
     try {
-      const resp = await fetch(`/api/sitesync/orders/${order.id}/deliver`, {
-        method: 'POST',
-      });
-
-      const json = await resp.json();
-      if (!resp.ok || !json.success) {
-        throw new Error(json.message || 'Failed to confirm delivery.');
-      }
-
+      await ordersApi.updateDistributorInvoiceStatus(order.rawId, 'delivered');
       setToast({
         id: String(Date.now()),
         type: 'success',
-        message: `Consignment for Order ${order.id} confirmed received! Stock has been added to your Store Inventory.`,
+        message: `Consignment for Order ${order.id} confirmed received! Stock has been added to dealer inventory.`,
       });
+      await loadData();
       setActiveTab('delivered');
-      if (selectedOrder && selectedOrder.id === order.id) {
-        setSelectedOrder((prev) =>
-          prev ? { ...prev, status: 'Delivered', dbStatus: 'delivered', canConfirmDelivery: false, deliveredAt: deliveredTime } : null
-        );
-      }
     } catch (err: any) {
       console.error('Error confirming delivery:', err);
       setToast({
@@ -242,7 +240,6 @@ export default function OrdersManagement() {
         type: 'error',
         message: err.message || 'Failed to confirm delivery.',
       });
-      await loadData();
     } finally {
       setDeliveringOrderId(null);
     }

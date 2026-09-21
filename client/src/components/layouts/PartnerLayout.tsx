@@ -15,12 +15,12 @@ import {
   ShieldCheck,
   Check,
   Package,
+  BellOff,
 } from 'lucide-react';
 import DashboardView from '../dashboard/DashboardView';
 import RewardsView from '../rewards/RewardsView';
 import ProfileView from '../profile/ProfileView';
 import OrdersManagement from '../orders/OrdersManagement';
-import { GlobalSearch } from '../ui/GlobalSearch';
 import { dataService, UserProfile } from '../../services/dataService';
 import { useAuth } from '../../context/AuthContext';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
@@ -60,22 +60,15 @@ export default function PartnerLayout({ onLogout }: { onLogout: () => void }) {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profile, setProfile] = useState<UserProfile>(dataService.getUserProfile());
 
-  const [notifications, setNotifications] = useState([
-    {
-      id: '1',
-      title: 'Order Status Update',
-      desc: 'Your recent construction materials order has been confirmed',
-      time: '18m ago',
-      unread: true,
-    },
-    {
-      id: '2',
-      title: 'Points Earned',
-      desc: '150 loyalty points added from your last verified invoice',
-      time: '2h ago',
-      unread: false,
-    },
-  ]);
+  interface NotificationItem {
+    id: string;
+    title: string;
+    desc: string;
+    time: string;
+    unread: boolean;
+  }
+
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
 
   const notifRef = useRef<HTMLDivElement>(null);
 
@@ -329,8 +322,6 @@ export default function PartnerLayout({ onLogout }: { onLogout: () => void }) {
           </div>
 
           <div className="flex items-center gap-3">
-            <GlobalSearch onSelectTab={(tab) => setActiveTab(tab)} />
-
             {/* Notifications Popover */}
             <div className="relative" ref={notifRef}>
               <button
@@ -366,20 +357,30 @@ export default function PartnerLayout({ onLogout }: { onLogout: () => void }) {
                   </div>
 
                   <div className="max-h-72 overflow-y-auto divide-y divide-slate-100">
-                    {notifications.map((n) => (
-                      <div
-                        key={n.id}
-                        className={`p-3 text-left hover:bg-slate-50 transition-colors ${
-                          n.unread ? 'bg-blue-50/40' : ''
-                        }`}
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <p className="text-xs font-bold text-slate-800 leading-tight">{n.title}</p>
-                          <span className="text-[10px] text-slate-400 shrink-0">{n.time}</span>
-                        </div>
-                        <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">{n.desc}</p>
+                    {notifications.length === 0 ? (
+                      <div className="py-7 text-center px-4">
+                        <BellOff size={22} className="mx-auto text-slate-300 mb-2" />
+                        <p className="text-xs font-bold text-slate-700">No New Notifications</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          Order confirmations and rewards alerts will appear here.
+                        </p>
                       </div>
-                    ))}
+                    ) : (
+                      notifications.map((n) => (
+                        <div
+                          key={n.id}
+                          className={`p-3 text-left hover:bg-slate-50 transition-colors ${
+                            n.unread ? 'bg-blue-50/40' : ''
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-xs font-bold text-slate-800 leading-tight">{n.title}</p>
+                            <span className="text-[10px] text-slate-400 shrink-0">{n.time}</span>
+                          </div>
+                          <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">{n.desc}</p>
+                        </div>
+                      ))
+                    )}
                   </div>
                 </div>
               )}

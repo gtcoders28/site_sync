@@ -20,7 +20,10 @@ import {
   PanelLeftOpen,
   Activity,
   Plus,
+  BellOff,
+  UserCheck,
 } from 'lucide-react';
+import { usersApi, ordersApi } from '../../lib/api';
 import { motion, AnimatePresence } from 'motion/react';
 import DashboardView from '../dashboard/DashboardView';
 import DistributorNetworkView from '../directory/DistributorNetworkView';
@@ -32,7 +35,7 @@ import DealerManagement from '../directory/DealerManagement';
 import OrdersManagement from '../orders/OrdersManagement';
 import ProductManagement from '../inventory/ProductManagement';
 import InvoiceWorkspace from '../billing/InvoiceWorkspace';
-import { GlobalSearch } from '../ui/GlobalSearch';
+import RegistrationApprovalsView from '../approvals/RegistrationApprovalsView';
 import { dataService, UserProfile } from '../../services/dataService';
 import { useAuth } from '../../context/AuthContext';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
@@ -59,6 +62,7 @@ const NAV_SECTIONS: NavSection[] = [
   {
     title: 'NETWORK & DIRECTORY',
     items: [
+      { id: 'approvals', label: 'Registration Approvals', icon: UserCheck },
       { id: 'distributor', label: 'Distributor Network', icon: Network },
       { id: 'dealer', label: 'Dealer Directory', icon: Store },
       { id: 'customer', label: 'Customer Base', icon: Users },
@@ -83,34 +87,64 @@ export default function EnterpriseLayout({ onLogout }: { onLogout: () => void })
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profile, setProfile] = useState<UserProfile>(dataService.getUserProfile());
 
-  const [notifications, setNotifications] = useState([
-    {
-      id: '1',
-      title: 'Consignment In Transit',
-      desc: 'Order ORD-13284 en route to Shree Ram Hardware',
-      time: '12m ago',
-      unread: true,
-      type: 'truck',
-    },
-    {
-      id: '2',
-      title: 'Warehouse Stock Synced',
-      desc: 'UltraTech Super Cement balance updated in central log',
-      time: '45m ago',
-      unread: true,
-      type: 'package',
-    },
-    {
-      id: '3',
-      title: 'New Dealer Onboarded',
-      desc: 'Metro Hardware Central Depot verified under regional hub',
-      time: '2h ago',
-      unread: false,
-      type: 'user',
-    },
-  ]);
+  interface NotificationItem {
+    id: string;
+    title: string;
+    desc: string;
+    time: string;
+    unread: boolean;
+    type?: 'truck' | 'package' | 'user';
+  }
+
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
 
   const notifRef = useRef<HTMLDivElement>(null);
+
+  const loadNotifications = async () => {
+    try {
+      const [approvalsRes, invoicesRes] = await Promise.all([
+        usersApi.getApprovalRequests().catch(() => null),
+        ordersApi.getDistributorInvoices().catch(() => null),
+      ]);
+      const alerts: NotificationItem[] = [];
+
+      const approvals = Array.isArray(approvalsRes?.data) ? approvalsRes.data : [];
+      const pendingApprovals = approvals.filter((a: any) => a.status === 'pending');
+      if (pendingApprovals.length > 0) {
+        alerts.push({
+          id: 'approvals',
+          title: 'Pending Network Approvals',
+          desc: `${pendingApprovals.length} partner registration request${pendingApprovals.length > 1 ? 's' : ''} awaiting approval`,
+          time: 'Action required',
+          unread: true,
+          type: 'user',
+        });
+      }
+
+      const invoices = Array.isArray(invoicesRes?.data) ? invoicesRes.data : [];
+      const inTransit = invoices.filter(
+        (i: any) => (i.status || '').toLowerCase() === 'dispatched' || (i.status || '').toLowerCase() === 'in transit'
+      );
+      inTransit.slice(0, 3).forEach((inv: any) => {
+        alerts.push({
+          id: inv.invoice_id,
+          title: 'Consignment In Transit',
+          desc: `Consignment ${inv.invoice_number} en route to ${inv.dealer_name || 'Dealer'}`,
+          time: 'In transit',
+          unread: true,
+          type: 'truck',
+        });
+      });
+
+      setNotifications(alerts);
+    } catch {
+      setNotifications([]);
+    }
+  };
+
+  useEffect(() => {
+    loadNotifications();
+  }, [user]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -149,6 +183,8 @@ export default function EnterpriseLayout({ onLogout }: { onLogout: () => void })
     switch (activeTab) {
       case 'dashboard':
         return <DashboardView onNavigateTab={(tab) => setActiveTab(tab)} />;
+      case 'approvals':
+        return <RegistrationApprovalsView />;
       case 'distributor':
       case 'referral':
       case 'referrals':
@@ -177,48 +213,66 @@ export default function EnterpriseLayout({ onLogout }: { onLogout: () => void })
     <div className="min-h-screen bg-slate-100/70 flex overflow-hidden font-sans">
       {/* Sidebar - Desktop */}
       <aside
-        className={`hidden md:flex flex-col bg-slate-950 border-r border-slate-900 text-slate-300 transition-all duration-300 ease-in-out shrink-0 z-30 ${
+        className={`hidden md:flex flex-col bg-slate-950 border-r border-slate-900 text-slate-300 transition-all duration-300 ease-in-out shrink-0 z-30 overflow-x-hidden ${
           sidebarCollapsed ? 'w-20' : 'w-64'
         }`}
       >
         {/* Brand Header */}
-        <div className="p-4 border-b border-slate-900/90 flex items-center justify-between">
-          <div className="flex items-center gap-3 overflow-hidden">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 via-amber-500 to-orange-600 flex items-center justify-center text-white text-base font-black shadow-lg shadow-orange-500/20 ring-1 ring-orange-400/30 shrink-0">
-              S
-            </div>
-            {!sidebarCollapsed && (
-              <div className="leading-tight truncate">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-base font-extrabold tracking-tight text-white">
-                    Site<span className="text-orange-500">Sync</span>
-                  </span>
-                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-orange-500/15 text-orange-400 border border-orange-500/30">
-                    PRO
+        <div
+          className={`h-16 border-b border-slate-900/90 flex items-center transition-all ${
+            sidebarCollapsed ? 'justify-center px-2' : 'justify-between px-4'
+          }`}
+        >
+          {sidebarCollapsed ? (
+            <button
+              onClick={() => setSidebarCollapsed(false)}
+              className="group relative w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 via-amber-500 to-orange-600 flex items-center justify-center text-white text-base font-black shadow-md shadow-orange-500/20 hover:ring-2 hover:ring-orange-400/50 transition-all cursor-pointer shrink-0"
+              title="Expand Sidebar"
+              aria-label="Expand Sidebar"
+            >
+              <span className="group-hover:hidden">S</span>
+              <PanelLeftOpen size={18} className="hidden group-hover:block text-white" />
+            </button>
+          ) : (
+            <>
+              <div className="flex items-center gap-3 overflow-hidden">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 via-amber-500 to-orange-600 flex items-center justify-center text-white text-base font-black shadow-lg shadow-orange-500/20 ring-1 ring-orange-400/30 shrink-0">
+                  S
+                </div>
+                <div className="leading-tight truncate">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-base font-extrabold tracking-tight text-white">
+                      Site<span className="text-orange-500">Sync</span>
+                    </span>
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-orange-500/15 text-orange-400 border border-orange-500/30">
+                      PRO
+                    </span>
+                  </div>
+                  <span className="block text-[10px] uppercase tracking-wider text-slate-400 font-semibold mt-0.5">
+                    Distributor Hub
                   </span>
                 </div>
-                <span className="block text-[10px] uppercase tracking-wider text-slate-400 font-semibold mt-0.5">
-                  Distributor Hub
-                </span>
               </div>
-            )}
-          </div>
 
-          <button
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className="p-1.5 text-slate-500 hover:text-slate-200 hover:bg-slate-900 rounded-lg transition-colors cursor-pointer hidden md:block"
-            title={sidebarCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
-            aria-label="Toggle sidebar collapse"
-          >
-            {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-          </button>
+              <button
+                onClick={() => setSidebarCollapsed(true)}
+                className="p-1.5 text-slate-500 hover:text-slate-200 hover:bg-slate-900 rounded-lg transition-colors cursor-pointer"
+                title="Collapse Sidebar"
+                aria-label="Collapse Sidebar"
+              >
+                <PanelLeftClose size={16} />
+              </button>
+            </>
+          )}
         </div>
 
         {/* Grouped Navigation */}
-        <nav className="flex-1 overflow-y-auto custom-scrollbar px-2.5 py-4 space-y-5">
-          {NAV_SECTIONS.map((section) => (
+        <nav className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar px-2.5 py-4 space-y-4">
+          {NAV_SECTIONS.map((section, idx) => (
             <div key={section.title} className="space-y-1">
-              {!sidebarCollapsed && (
+              {sidebarCollapsed ? (
+                idx > 0 && <div className="my-2 border-t border-slate-900/80 mx-1" />
+              ) : (
                 <div className="px-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
                   {section.title}
                 </div>
@@ -230,16 +284,18 @@ export default function EnterpriseLayout({ onLogout }: { onLogout: () => void })
                   <button
                     key={item.id}
                     onClick={() => setActiveTab(item.id)}
-                    title={sidebarCollapsed ? item.label : undefined}
+                    title={item.label}
                     className={`w-full flex items-center ${
-                      sidebarCollapsed ? 'justify-center px-0' : 'justify-between px-3'
-                    } py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer relative group ${
+                      sidebarCollapsed ? 'justify-center px-0 h-10 w-10 mx-auto' : 'justify-between px-3 py-2.5'
+                    } rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer relative group ${
                       isActive
-                        ? 'bg-gradient-to-r from-orange-500/20 via-orange-500/10 to-transparent text-white border-l-2 border-orange-500 font-bold shadow-xs'
+                        ? sidebarCollapsed
+                          ? 'bg-orange-500/20 text-orange-400 border border-orange-500/40 shadow-xs'
+                          : 'bg-gradient-to-r from-orange-500/20 via-orange-500/10 to-transparent text-white border-l-2 border-orange-500 font-bold shadow-xs'
                         : 'text-slate-400 hover:bg-slate-900/80 hover:text-slate-100'
                     }`}
                   >
-                    <div className="flex items-center gap-3 truncate">
+                    <div className={`flex items-center ${sidebarCollapsed ? 'justify-center' : 'gap-3 truncate'}`}>
                       <IconComponent
                         size={18}
                         className={isActive ? 'text-orange-400 shrink-0' : 'text-slate-400 group-hover:text-slate-200 shrink-0'}
@@ -251,13 +307,6 @@ export default function EnterpriseLayout({ onLogout }: { onLogout: () => void })
                         {item.badge}
                       </span>
                     )}
-
-                    {/* Floating Tooltip when collapsed */}
-                    {sidebarCollapsed && (
-                      <span className="absolute left-full ml-3 px-2.5 py-1 rounded-lg bg-slate-900 text-white text-xs font-semibold whitespace-nowrap shadow-xl border border-slate-800 opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50">
-                        {item.label}
-                      </span>
-                    )}
                   </button>
                 );
               })}
@@ -265,17 +314,62 @@ export default function EnterpriseLayout({ onLogout }: { onLogout: () => void })
           ))}
         </nav>
 
+        {/* Collapse Toggle Footer */}
+        <div className="px-2 py-1.5 border-t border-slate-900/90">
+          <button
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            className={`w-full flex items-center ${
+              sidebarCollapsed ? 'justify-center h-9' : 'justify-between px-3 py-2'
+            } text-slate-400 hover:text-slate-100 hover:bg-slate-900 rounded-xl text-xs font-semibold transition-colors cursor-pointer`}
+            title={sidebarCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
+          >
+            {sidebarCollapsed ? (
+              <PanelLeftOpen size={16} />
+            ) : (
+              <span className="flex items-center gap-2">
+                <PanelLeftClose size={15} />
+                <span>Collapse Sidebar</span>
+              </span>
+            )}
+          </button>
+        </div>
+
         {/* User Status Bar in Sidebar */}
-        <div className="p-3 border-t border-slate-900 m-2 bg-slate-900/70 rounded-2xl border border-slate-800/80">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2.5 truncate">
-              <div className="relative shrink-0">
-                <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-slate-800 to-slate-700 text-white flex items-center justify-center font-bold text-xs border border-slate-700 shadow-2xs">
+        <div
+          className={`border-t border-slate-900 ${
+            sidebarCollapsed
+              ? 'p-2 flex flex-col items-center gap-2'
+              : 'p-3 m-2 bg-slate-900/70 rounded-2xl border border-slate-800/80'
+          }`}
+        >
+          {sidebarCollapsed ? (
+            <>
+              <div
+                className="relative shrink-0"
+                title={`${profile?.name || user?.name || 'Enterprise Admin'} (Regional Hub)`}
+              >
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-slate-800 to-slate-700 text-white flex items-center justify-center font-bold text-xs border border-slate-700 shadow-2xs">
                   {(profile?.name?.[0] || user?.name?.[0] || 'E').toUpperCase()}
                 </div>
                 <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-slate-950 animate-pulse" />
               </div>
-              {!sidebarCollapsed && (
+              <button
+                onClick={onLogout}
+                className="p-2 text-slate-400 hover:text-rose-400 hover:bg-slate-900 rounded-xl transition-colors cursor-pointer"
+                title="Sign Out"
+              >
+                <LogOut size={16} />
+              </button>
+            </>
+          ) : (
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5 truncate">
+                <div className="relative shrink-0">
+                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-slate-800 to-slate-700 text-white flex items-center justify-center font-bold text-xs border border-slate-700 shadow-2xs">
+                    {(profile?.name?.[0] || user?.name?.[0] || 'E').toUpperCase()}
+                  </div>
+                  <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-slate-950 animate-pulse" />
+                </div>
                 <div className="text-left leading-tight truncate">
                   <p className="text-xs font-bold text-white truncate max-w-[100px]">
                     {profile?.name || user?.name || 'Enterprise Admin'}
@@ -285,9 +379,7 @@ export default function EnterpriseLayout({ onLogout }: { onLogout: () => void })
                     <p className="text-[10px] text-slate-400 truncate">Regional Hub</p>
                   </div>
                 </div>
-              )}
-            </div>
-            {!sidebarCollapsed && (
+              </div>
               <button
                 onClick={onLogout}
                 className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800/80 rounded-lg transition-colors cursor-pointer"
@@ -295,8 +387,8 @@ export default function EnterpriseLayout({ onLogout }: { onLogout: () => void })
               >
                 <LogOut size={15} />
               </button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </aside>
 
@@ -376,7 +468,7 @@ export default function EnterpriseLayout({ onLogout }: { onLogout: () => void })
       <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden pb-14 md:pb-0">
         {/* Top Header */}
         <header className="bg-white/85 backdrop-blur-xl border-b border-slate-200/80 h-16 flex items-center justify-between px-3 sm:px-6 lg:px-8 shrink-0 z-20 sticky top-0 shadow-xs">
-          <div className="flex items-center gap-3 flex-1 min-w-0">
+          <div className="flex items-center gap-3 min-w-0">
             <button
               className="md:hidden p-2 text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
               onClick={() => setMobileMenuOpen(true)}
@@ -386,33 +478,20 @@ export default function EnterpriseLayout({ onLogout }: { onLogout: () => void })
             </button>
 
             {/* Breadcrumb / Active Context Indicator */}
-            <div className="hidden lg:flex items-center gap-2 text-xs font-semibold text-slate-400 shrink-0">
-              <span className="hover:text-slate-700 cursor-pointer" onClick={() => setActiveTab('dashboard')}>
+            <div className="flex items-center gap-2 text-xs font-semibold text-slate-400 shrink-0">
+              <span className="hover:text-slate-700 cursor-pointer hidden sm:inline" onClick={() => setActiveTab('dashboard')}>
                 Enterprise Hub
               </span>
-              <ChevronRight size={13} className="text-slate-300" />
+              <ChevronRight size={13} className="text-slate-300 hidden sm:inline" />
               <div className="flex items-center gap-1.5 text-slate-900 font-bold bg-slate-100/90 px-3 py-1 rounded-lg border border-slate-200/70 shadow-2xs">
                 <CurrentIcon size={14} className="text-orange-500" />
                 <span>{currentTabItem?.label}</span>
               </div>
             </div>
-
-            {/* Global Search Bar */}
-            <div className="flex-1 max-w-md ml-0 lg:ml-4">
-              <GlobalSearch onSelectTab={(tab) => setActiveTab(tab)} />
-            </div>
           </div>
 
           {/* Right Top Header Actions */}
           <div className="flex items-center gap-2.5 sm:gap-3 shrink-0 ml-2">
-            {/* Live Operational Health Pill */}
-            <div className="hidden 2xl:flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-50/90 border border-emerald-200/80 text-emerald-800 text-xs font-bold shadow-2xs">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span>Live Node: Central Hub</span>
-              <span className="text-emerald-300">•</span>
-              <span className="font-mono text-emerald-600 text-[11px]">18ms</span>
-            </div>
-
             {/* Notification Bell with Popover */}
             <div ref={notifRef} className="relative">
               <button
@@ -459,25 +538,44 @@ export default function EnterpriseLayout({ onLogout }: { onLogout: () => void })
                     </div>
 
                     <div className="space-y-1.5 max-h-72 overflow-y-auto custom-scrollbar">
-                      {notifications.map((n) => (
-                        <div
-                          key={n.id}
-                          className={`p-2.5 rounded-xl border transition-colors ${
-                            n.unread
-                              ? 'bg-orange-50/40 border-orange-100 text-slate-800'
-                              : 'bg-white border-slate-100 text-slate-600 hover:bg-slate-50'
-                          }`}
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                              {n.unread && <span className="w-1.5 h-1.5 rounded-full bg-orange-500 shrink-0" />}
-                              <span>{n.title}</span>
-                            </div>
-                            <span className="text-[10px] text-slate-400 shrink-0">{n.time}</span>
-                          </div>
-                          <p className="text-[11px] text-slate-500 mt-1 leading-relaxed pl-3">{n.desc}</p>
+                      {notifications.length === 0 ? (
+                        <div className="py-7 text-center px-4">
+                          <BellOff size={22} className="mx-auto text-slate-300 mb-2" />
+                          <p className="text-xs font-bold text-slate-700">No New Notifications</p>
+                          <p className="text-[11px] text-slate-400 mt-0.5">
+                            Operational dispatches and partner requests will appear here.
+                          </p>
                         </div>
-                      ))}
+                      ) : (
+                        notifications.map((n) => (
+                          <div
+                            key={n.id}
+                            onClick={() => {
+                              if (n.id === 'approvals') {
+                                setActiveTab('approvals');
+                                setNotificationsOpen(false);
+                              } else if (n.id === 'invoices' || n.type === 'truck') {
+                                setActiveTab('orders');
+                                setNotificationsOpen(false);
+                              }
+                            }}
+                            className={`p-2.5 rounded-xl border transition-colors cursor-pointer ${
+                              n.unread
+                                ? 'bg-orange-50/40 border-orange-100 text-slate-800 hover:bg-orange-50/80'
+                                : 'bg-white border-slate-100 text-slate-600 hover:bg-slate-50'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                                {n.unread && <span className="w-1.5 h-1.5 rounded-full bg-orange-500 shrink-0" />}
+                                <span>{n.title}</span>
+                              </div>
+                              <span className="text-[10px] text-slate-400 shrink-0">{n.time}</span>
+                            </div>
+                            <p className="text-[11px] text-slate-500 mt-1 leading-relaxed pl-3">{n.desc}</p>
+                          </div>
+                        ))
+                      )}
                     </div>
                   </motion.div>
                 )}

@@ -37,6 +37,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     setUser(null);
     try {
       localStorage.removeItem(AUTH_STORAGE_KEY);
+      localStorage.removeItem('sitesync_refresh_token');
     } catch {}
   }, []);
 
@@ -86,6 +87,11 @@ export function AuthProvider({ children }: PropsWithChildren) {
     const tokens = result.data.tokens;
     if (tokens?.accessToken) {
       apiClient.setAccessToken(tokens.accessToken);
+    }
+    if (tokens?.refreshToken) {
+      try {
+        localStorage.setItem('sitesync_refresh_token', tokens.refreshToken);
+      } catch {}
     }
     setUser(result.data.user);
     dataService.syncWithAuthenticatedUser(result.data.user);

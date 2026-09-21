@@ -22,8 +22,15 @@ export class ApiError extends Error {
 }
 
 type RequestOptions = Omit<RequestInit, 'body'> & { body?: unknown; skipRefresh?: boolean };
-const baseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api/v1').replace(/\/$/, '');
+const baseUrl = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '');
+const ACCESS_TOKEN_KEY = 'sitesync_access_token';
+const REFRESH_TOKEN_KEY = 'sitesync_refresh_token';
+
 let accessToken: string | null = null;
+try {
+  accessToken = localStorage.getItem(ACCESS_TOKEN_KEY);
+} catch {}
+
 let refreshPromise: Promise<string | null> | null = null;
 let onSessionExpired: (() => void) | null = null;
 
@@ -34,15 +41,33 @@ const parseBody = async <T>(response: Response): Promise<T> => {
 
 const refreshAccessToken = async (): Promise<string | null> => {
   if (!refreshPromise) {
+    let storedRefresh: string | null = null;
+    try {
+      storedRefresh = localStorage.getItem(REFRESH_TOKEN_KEY);
+    } catch {}
+
     refreshPromise = fetch(`${baseUrl}/auth/refresh-token`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', credentials: 'include',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: storedRefresh || undefined }),
+      credentials: 'include',
     }).then(async (response) => {
-      const result = await parseBody<ApiResult<{ accessToken: string }>>(response);
+      const result = await parseBody<ApiResult<{ accessToken: string; refreshToken?: string }>>(response);
       if (!response.ok || !result.success || !result.data?.accessToken) throw new Error('Session refresh failed');
       accessToken = result.data.accessToken;
+      try {
+        localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+        if (result.data.refreshToken) {
+          localStorage.setItem(REFRESH_TOKEN_KEY, result.data.refreshToken);
+        }
+      } catch {}
       return accessToken;
     }).catch(() => {
       accessToken = null;
+      try {
+        localStorage.removeItem(ACCESS_TOKEN_KEY);
+        localStorage.removeItem(REFRESH_TOKEN_KEY);
+      } catch {}
       onSessionExpired?.();
       return null;
     }).finally(() => { refreshPromise = null; });
@@ -74,7 +99,17 @@ export const apiClient = {
   post: <T>(path: string, body?: unknown, options?: RequestOptions) => request<T>(path, { ...options, method: 'POST', body }),
   patch: <T>(path: string, body?: unknown, options?: RequestOptions) => request<T>(path, { ...options, method: 'PATCH', body }),
   put: <T>(path: string, body?: unknown, options?: RequestOptions) => request<T>(path, { ...options, method: 'PUT', body }),
-  setAccessToken: (token: string | null) => { accessToken = token; },
+  delete: <T>(path: string, options?: RequestOptions) => request<T>(path, { ...options, method: 'DELETE' }),
+  setAccessToken: (token: string | null) => {
+    accessToken = token;
+    try {
+      if (token) {
+        localStorage.setItem(ACCESS_TOKEN_KEY, token);
+      } else {
+        localStorage.removeItem(ACCESS_TOKEN_KEY);
+      }
+    } catch {}
+  },
   refreshAccessToken,
   setSessionExpiredHandler: (handler: (() => void) | null) => { onSessionExpired = handler; },
 };

@@ -12,10 +12,10 @@ import {
   Check,
   Share2,
   X,
+  BellOff,
 } from 'lucide-react';
 import InfluencerProfile from '../profile/InfluencerProfile';
 import RewardsView from '../rewards/RewardsView';
-import { GlobalSearch } from '../ui/GlobalSearch';
 import { useAuth } from '../../context/AuthContext';
 import { Toast, ToastMessage } from '../ui/Toast';
 import { EmptyState } from '../ui/EmptyState';
@@ -116,22 +116,15 @@ export default function InfluencerLayout({ onLogout }: { onLogout: () => void })
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
 
-  const [notifications, setNotifications] = useState([
-    {
-      id: '1',
-      title: 'Referral Incentive Credited',
-      desc: 'Contractor joined using your code. 500 bonus points added.',
-      time: '1h ago',
-      unread: true,
-    },
-    {
-      id: '2',
-      title: 'Milestone Reward Unlocked',
-      desc: 'You have reached Tier 2 Contractor Partner status!',
-      time: '1d ago',
-      unread: false,
-    },
-  ]);
+  interface NotificationItem {
+    id: string;
+    title: string;
+    desc: string;
+    time: string;
+    unread: boolean;
+  }
+
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
 
   const notifRef = React.useRef<HTMLDivElement>(null);
 
@@ -350,8 +343,6 @@ export default function InfluencerLayout({ onLogout }: { onLogout: () => void })
           </div>
 
           <div className="flex items-center gap-3">
-            <GlobalSearch onSelectTab={(tab) => setActiveTab(tab)} />
-
             {/* Notifications Popover */}
             <div className="relative" ref={notifRef}>
               <button
@@ -387,20 +378,30 @@ export default function InfluencerLayout({ onLogout }: { onLogout: () => void })
                   </div>
 
                   <div className="max-h-72 overflow-y-auto divide-y divide-slate-100">
-                    {notifications.map((n) => (
-                      <div
-                        key={n.id}
-                        className={`p-3 text-left hover:bg-slate-50 transition-colors ${
-                          n.unread ? 'bg-purple-50/40' : ''
-                        }`}
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <p className="text-xs font-bold text-slate-800 leading-tight">{n.title}</p>
-                          <span className="text-[10px] text-slate-400 shrink-0">{n.time}</span>
-                        </div>
-                        <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">{n.desc}</p>
+                    {notifications.length === 0 ? (
+                      <div className="py-7 text-center px-4">
+                        <BellOff size={22} className="mx-auto text-slate-300 mb-2" />
+                        <p className="text-xs font-bold text-slate-700">No New Notifications</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          Referral milestone and incentive alerts will appear here.
+                        </p>
                       </div>
-                    ))}
+                    ) : (
+                      notifications.map((n) => (
+                        <div
+                          key={n.id}
+                          className={`p-3 text-left hover:bg-slate-50 transition-colors ${
+                            n.unread ? 'bg-purple-50/40' : ''
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-xs font-bold text-slate-800 leading-tight">{n.title}</p>
+                            <span className="text-[10px] text-slate-400 shrink-0">{n.time}</span>
+                          </div>
+                          <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">{n.desc}</p>
+                        </div>
+                      ))
+                    )}
                   </div>
                 </div>
               )}

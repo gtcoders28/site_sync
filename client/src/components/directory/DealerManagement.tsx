@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Plus, Store, Trash2 } from 'lucide-react';
-import { dataService, Dealer } from '../../services/dataService';
+import { Search, Plus, Store, Trash2, Eye, EyeOff, Lock } from 'lucide-react';
+import { Dealer } from '../../services/dataService';
 import { formatNumber } from '../../utils';
 import { Modal } from '../ui/Modal';
 import { Toast, ToastMessage } from '../ui/Toast';
 import { EmptyState } from '../ui/EmptyState';
 import { CustomDropdown } from '../ui/CustomDropdown';
 import { StatusPillDropdown } from '../ui/StatusPillDropdown';
+import { SearchableSelect, INDIAN_STATES_AND_UTS } from '../ui/SearchableSelect';
 import { useAuth } from '../../context/AuthContext';
+import { usersApi, authApi } from '../../lib/api';
 
 export default function DealerManagement() {
   const { user } = useAuth();
@@ -22,32 +24,45 @@ export default function DealerManagement() {
   const [newShopName, setNewShopName] = useState('');
   const [newOwnerName, setNewOwnerName] = useState('');
   const [newType, setNewType] = useState<'Wholesale' | 'Retail' | 'Distributor'>('Wholesale');
-  const [newLocation, setNewLocation] = useState('');
+  const [newCity, setNewCity] = useState('');
+  const [newState, setNewState] = useState('');
   const [newContact, setNewContact] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [newStatus, setNewStatus] = useState<'Active' | 'Pending'>('Active');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
 
-  const loadDealers = () => {
-    fetch('/api/sitesync/dealers')
-      .then((r) => r.json())
-      .then((j) => {
-        if (j.success && Array.isArray(j.data) && j.data.length > 0) {
-          setDealers(j.data);
-        } else {
-          setDealers(dataService.getDealers());
-        }
-      })
-      .catch(() => {
-        setDealers(dataService.getDealers());
-      });
+  // Delete Dealer State
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [dealerToDelete, setDealerToDelete] = useState<Dealer | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const loadDealers = async () => {
+    try {
+      const res = await usersApi.getDealers();
+      const raw = Array.isArray(res?.data) ? res.data : [];
+      const mapped: Dealer[] = raw.map((d: any) => ({
+        id: d.dealer_id?.slice(0, 8) || 'DLR',
+        rawId: d.dealer_id,
+        shopName: d.shop_name || 'Regional Dealership',
+        ownerName: d.owner_name || 'Authorized Partner',
+        type: (d.dealer_type === 'distributor' ? 'Distributor' : d.dealer_type === 'retailer' ? 'Retail' : 'Wholesale') as Dealer['type'],
+        location: `${d.city || 'Regional Center'}, ${d.state || 'India'}`,
+        contact: d.mobile_number ? `+91 ${d.mobile_number}` : 'Unlisted',
+        orders: 0,
+        joinedDate: d.created_at ? new Date(d.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Recent',
+        status: (d.status === 'active' || d.status === 'Active' ? 'Active' : 'Pending') as Dealer['status'],
+      }));
+      setDealers(mapped);
+    } catch (err) {
+      console.error('Failed to load dealers:', err);
+      setDealers([]);
+    }
   };
 
   useEffect(() => {
     loadDealers();
-    const unsubscribe = dataService.subscribe(() => {
-      loadDealers();
-    });
-    return unsubscribe;
   }, []);
 
   const cities = useMemo(() => {
@@ -63,62 +78,89 @@ export default function DealerManagement() {
 
   const handleCreateDealer = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanContact = newContact.replace(/\D/g, '').slice(-10);
-    if (!newShopName.trim() || !cleanContact || cleanContact.length !== 10) {
-      setToast({ id: String(Date.now()), type: 'error', message: 'Firm Name and a valid 10-digit mobile number are required.' });
+    setModalError(null);
+    const cleanContact = newContact.replace(/\D/g, '');
+    if (!newShopName.trim()) {
+      setModalError('Shop / Firm Name is required.');
+      return;
+    }
+    if (cleanContact.length !== 10) {
+      setModalError('Please enter a valid 10-digit mobile number.');
+      return;
+    }
+    if (!newCity.trim()) {
+      setModalError('City is required.');
+      return;
+    }
+    if (!newState.trim()) {
+      setModalError('Please select a State from the list.');
+      return;
+    }
+    if (!newPassword || newPassword.length < 6) {
+      setModalError('Password is required and must be at least 6 characters long.');
       return;
     }
 
     setIsSubmitting(true);
     try {
-      const distId = user?.rawId || user?.distributorId || null;
-      const resp = await fetch('/api/sitesync/dealers', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          shopName: newShopName.trim(),
-          ownerName: newOwnerName.trim() || 'Authorized Partner',
-          type: newType,
-          location: newLocation.trim() || 'Regional Center',
-          contact: cleanContact,
-          status: newStatus,
-          distributorId: distId,
-          password: 'Dealer@123',
-        }),
-      });
-
-      const json = await resp.json();
-      if (!resp.ok || !json.success) {
-        throw new Error(json.message || 'Failed to create dealer in database.');
+      let distId = user?.distributorId || (user as any)?.distributor_id || (user?.role?.includes('distributor') ? user?.id : null);
+      if (!distId) {
+        const publicDists = await usersApi.getDistributors().catch(() => ({ success: true, data: [] }));
+        const distList = Array.isArray(publicDists?.data) ? publicDists.data : [];
+        if (distList.length > 0) {
+          distId = distList[0].distributor_id;
+        }
       }
 
-      dataService.createDealer({
+      if (!distId) {
+        setModalError('No active distributor found to link this dealer.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      const mappedType =
+        newType.toLowerCase() === 'retail'
+          ? 'retailer'
+          : newType.toLowerCase() === 'both'
+          ? 'both'
+          : 'wholesaler';
+
+      await authApi.signUp('dealer', {
         shopName: newShopName.trim(),
         ownerName: newOwnerName.trim() || 'Authorized Partner',
-        type: newType,
-        location: newLocation.trim() || 'Regional Center',
-        contact: `+91 ${cleanContact}`,
-        status: newStatus,
+        dealerType: mappedType,
+        city: newCity.trim(),
+        state: newState.trim(),
+        mobileNumber: cleanContact,
+        distributorId: distId,
+        password: newPassword,
+        source: 'created_by_distributor',
       });
 
       setIsAddModalOpen(false);
       setNewShopName('');
       setNewOwnerName('');
-      setNewLocation('');
+      setNewCity('');
+      setNewState('');
       setNewContact('');
-      loadDealers();
+      setNewPassword('');
+      setShowPassword(false);
+      setModalError(null);
+      await loadDealers();
 
       setToast({
         id: String(Date.now()),
         type: 'success',
-        message: `Dealer ${newShopName} registered in database! Login Mobile: ${cleanContact}, Password: Dealer@123`,
+        message: `Dealer "${newShopName.trim()}" registered in database! Mobile: ${cleanContact}`,
       });
     } catch (err: any) {
       console.error('Error creating dealer:', err);
+      const errMsg = err?.message || 'Failed to register dealer.';
+      setModalError(errMsg);
       setToast({
         id: String(Date.now()),
         type: 'error',
-        message: err.message || 'Failed to register dealer.',
+        message: errMsg,
       });
     } finally {
       setIsSubmitting(false);
@@ -126,58 +168,44 @@ export default function DealerManagement() {
   };
 
   const handleUpdateDealerStatus = async (id: string, nextStatus: Dealer['status']) => {
-    // Optimistic local update
     setDealers((prev) =>
       prev.map((d) => (d.id === id || (d as any).rawId === id ? { ...d, status: nextStatus } : d))
     );
-    dataService.updateDealerStatus(id, nextStatus);
-
-    try {
-      const dealer = dealers.find((d) => d.id === id || (d as any).rawId === id);
-      const targetId = (dealer as any)?.rawId || (dealer as any)?.mobileNumber || id;
-      await fetch(`/api/sitesync/dealers/${encodeURIComponent(targetId)}/status`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: nextStatus }),
-      });
-
-      setToast({
-        id: String(Date.now()),
-        type: 'success',
-        message: `Dealer status updated to ${nextStatus}.`,
-      });
-    } catch (err: any) {
-      console.error('Error updating dealer status:', err);
-    }
+    setToast({
+      id: String(Date.now()),
+      type: 'success',
+      message: `Dealer status set to ${nextStatus}.`,
+    });
   };
 
-  const handleDeleteDealer = async (id: string, name: string) => {
-    try {
-      const dealer = dealers.find((d) => d.id === id || (d as any).rawId === id);
-      const targetId = (dealer as any)?.rawId || (dealer as any)?.mobileNumber || id;
-      const resp = await fetch(`/api/sitesync/dealers/${encodeURIComponent(targetId)}`, {
-        method: 'DELETE',
-      });
-      const json = await resp.json();
-      if (!resp.ok || !json.success) {
-        throw new Error(json.message || 'Failed to delete dealer from database.');
-      }
+  const confirmDeleteDealer = (dealer: Dealer) => {
+    setDealerToDelete(dealer);
+    setDeleteModalOpen(true);
+  };
 
-      dataService.deleteDealer(id);
-      setDealers((prev) => prev.filter((d) => d.id !== id && (d as any).rawId !== id));
-      loadDealers();
+  const executeDeleteDealer = async () => {
+    if (!dealerToDelete) return;
+    const targetId = (dealerToDelete as any).rawId || dealerToDelete.id;
+    setIsDeleting(true);
+    try {
+      await usersApi.deleteDealer(targetId);
       setToast({
         id: String(Date.now()),
         type: 'success',
-        message: `Dealer ${name} permanently removed from live database.`,
+        message: `Dealer "${dealerToDelete.shopName}" deleted successfully from database.`,
       });
+      setDeleteModalOpen(false);
+      setDealerToDelete(null);
+      await loadDealers();
     } catch (err: any) {
-      console.error('Error deleting dealer:', err);
+      console.error('Failed to delete dealer:', err);
       setToast({
         id: String(Date.now()),
         type: 'error',
-        message: err.message || 'Failed to delete dealer.',
+        message: err?.message || 'Failed to delete dealer from database.',
       });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -357,7 +385,7 @@ export default function DealerManagement() {
                       </td>
                       <td className="px-4 lg:px-5 py-4 text-center whitespace-nowrap">
                         <button
-                          onClick={() => handleDeleteDealer(dealer.id, dealer.shopName)}
+                          onClick={() => confirmDeleteDealer(dealer)}
                           className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
                           title="Delete dealer"
                         >
@@ -382,10 +410,16 @@ export default function DealerManagement() {
       </div>
 
       {/* Add Dealer Modal */}
-      <Modal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title="Add Authorized Dealer" maxWidth="md">
+      <Modal isOpen={isAddModalOpen} onClose={() => { setIsAddModalOpen(false); setModalError(null); }} title="Add Authorized Dealer" maxWidth="md">
         <form onSubmit={handleCreateDealer} className="space-y-4">
+          {modalError && (
+            <div role="alert" className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs font-semibold text-red-700">
+              {modalError}
+            </div>
+          )}
+
           <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
               Shop / Firm Name *
             </label>
             <input
@@ -399,7 +433,7 @@ export default function DealerManagement() {
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
               Proprietor / Owner Name
             </label>
             <input
@@ -411,9 +445,9 @@ export default function DealerManagement() {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
             <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
                 Contact Phone *
               </label>
               <input
@@ -422,11 +456,11 @@ export default function DealerManagement() {
                 placeholder="e.g. 98256 30003"
                 value={newContact}
                 onChange={(e) => setNewContact(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-sm"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-sm font-medium"
               />
             </div>
             <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
                 Dealer Category
               </label>
               <CustomDropdown
@@ -444,21 +478,61 @@ export default function DealerManagement() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
             <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                Location / City & State
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                City *
               </label>
               <input
                 type="text"
-                placeholder="e.g. Phase II, New Delhi"
-                value={newLocation}
-                onChange={(e) => setNewLocation(e.target.value)}
+                required
+                placeholder="e.g. Indore"
+                value={newCity}
+                onChange={(e) => setNewCity(e.target.value)}
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-sm"
               />
             </div>
             <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                State *
+              </label>
+              <SearchableSelect
+                value={newState}
+                onChange={setNewState}
+                options={INDIAN_STATES_AND_UTS}
+                placeholder="Select State..."
+                required
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                Dealer Login Password *
+              </label>
+              <div className="relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  minLength={6}
+                  placeholder="Set dealer password (min. 6 chars)"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="w-full pl-3.5 pr-10 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-sm font-medium"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+                  title={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
                 Initial Status
               </label>
               <CustomDropdown
@@ -479,19 +553,76 @@ export default function DealerManagement() {
             <button
               type="button"
               onClick={() => setIsAddModalOpen(false)}
-              className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-sm font-medium transition-colors"
+              className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-sm font-medium transition-colors cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-5 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-sm font-semibold transition-colors shadow-xs"
+              className="px-5 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-sm font-semibold transition-colors shadow-xs cursor-pointer disabled:opacity-60"
             >
               {isSubmitting ? 'Registering…' : 'Register Dealer'}
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        isOpen={deleteModalOpen}
+        onClose={() => {
+          if (!isDeleting) {
+            setDeleteModalOpen(false);
+            setDealerToDelete(null);
+          }
+        }}
+        title="Delete Dealer"
+        description="Are you sure you want to delete this dealer? This will permanently delete the dealer record from PostgreSQL."
+        maxWidth="sm"
+      >
+        {dealerToDelete && (
+          <div className="space-y-4">
+            <div className="p-3.5 rounded-xl bg-red-50 border border-red-100 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-red-100 text-red-600 flex items-center justify-center font-bold shrink-0">
+                <Trash2 size={20} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="font-extrabold text-slate-900 text-sm truncate">{dealerToDelete.shopName}</p>
+                <p className="text-xs text-slate-500 font-medium">
+                  {dealerToDelete.ownerName} • {dealerToDelete.contact}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-500 leading-relaxed">
+              This action permanently removes the dealer from your network and database. This operation cannot be reversed.
+            </p>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteModalOpen(false);
+                  setDealerToDelete(null);
+                }}
+                disabled={isDeleting}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={executeDeleteDealer}
+                disabled={isDeleting}
+                className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold shadow-xs active:scale-95 transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-60"
+              >
+                <Trash2 size={14} />
+                <span>{isDeleting ? 'Deleting…' : 'Confirm Delete'}</span>
+              </button>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );

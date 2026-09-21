@@ -23,6 +23,7 @@ import { Modal } from '../ui/Modal';
 import { Toast, ToastMessage } from '../ui/Toast';
 import { CustomDropdown } from '../ui/CustomDropdown';
 import { useAuth } from '../../context/AuthContext';
+import { loyaltyApi } from '../../lib/api';
 
 interface PartnerRedemptionRequest {
   id: string;
@@ -42,7 +43,7 @@ export default function RewardsView({ onNavigateTab }: { onNavigateTab?: (tab: s
   const isDistributor = user?.role === 'distributor' || user?.role === 'platform_owner_distributor';
 
   const [profile, setProfile] = useState<UserProfile>(dataService.getUserProfile());
-  const [rewards, setRewards] = useState<Reward[]>([]);
+  const [rewards, setRewards] = useState<Reward[]>(dataService.getRewards());
   const [redemptions, setRedemptions] = useState<Redemption[]>([]);
   const [partnerRequests, setPartnerRequests] = useState<PartnerRedemptionRequest[]>([]);
   const [selectedReward, setSelectedReward] = useState<Reward | null>(null);
@@ -61,26 +62,47 @@ export default function RewardsView({ onNavigateTab }: { onNavigateTab?: (tab: s
   const [isSubmittingTier, setIsSubmittingTier] = useState(false);
 
   const loadData = async () => {
-    setProfile(dataService.getUserProfile());
-    setRedemptions(dataService.getRedemptions());
     try {
-      const res = await fetch('/api/sitesync/rewards');
-      const json = await res.json();
-      if (json.success && Array.isArray(json.data) && json.data.length > 0) {
-        setRewards(json.data);
-        return;
-      }
-    } catch {}
-    setRewards(dataService.getRewards());
+      const [balRes, redRes] = await Promise.all([
+        loyaltyApi.getMyBalance().catch(() => null),
+        loyaltyApi.getRedemptions().catch(() => ({ success: true, data: [] })),
+      ]);
+
+      const balance = balRes?.data?.balance ?? 0;
+      setProfile((prev) => ({ ...prev, pointsBalance: balance }));
+
+      const rawRedemptions = Array.isArray(redRes?.data) ? redRes.data : [];
+      const mappedRedemptions: Redemption[] = rawRedemptions.map((r: any) => ({
+        id: r.redemption_id?.slice(0, 8) || 'RED',
+        title: `Redemption Request (${formatNumber(r.points_requested || 0)} Pts)`,
+        points: Number(r.points_requested || 0),
+        date: r.created_at ? new Date(r.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Recent',
+        note: r.status ? `Status: ${r.status.toUpperCase()}` : 'Pending review',
+      }));
+      setRedemptions(mappedRedemptions);
+      setRewards(dataService.getRewards());
+    } catch (err) {
+      console.error('Failed to load loyalty data:', err);
+    }
   };
 
   const loadPartnerRequests = async () => {
     try {
-      const res = await fetch('/api/sitesync/rewards/requests');
-      const json = await res.json();
-      if (json.success && Array.isArray(json.data)) {
-        setPartnerRequests(json.data);
-      }
+      const res = await loyaltyApi.getRedemptions();
+      const raw = Array.isArray(res?.data) ? res.data : [];
+      const mapped: PartnerRedemptionRequest[] = raw.map((r: any) => ({
+        id: r.redemption_id,
+        partnerId: r.profile_id?.slice(0, 8) || 'PARTNER',
+        partnerName: r.profile_type ? `Partner (${r.profile_type})` : 'Authorized Partner',
+        partnerRole: r.profile_type || 'dealer',
+        rewardId: r.payment_details?.rewardId || 'REW-DEFAULT',
+        rewardTitle: r.payment_details?.title || `Redemption for ${r.points_requested} Pts`,
+        points: Number(r.points_requested || 0),
+        status: (r.status === 'approved' || r.status === 'fulfilled' ? 'approved' : r.status === 'rejected' ? 'rejected' : 'pending'),
+        requestDate: r.created_at ? new Date(r.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Recent',
+        notes: r.rejection_reason,
+      }));
+      setPartnerRequests(mapped);
     } catch (err) {
       console.error('Failed to load partner requests:', err);
     }
@@ -91,11 +113,7 @@ export default function RewardsView({ onNavigateTab }: { onNavigateTab?: (tab: s
     if (isDistributor) {
       loadPartnerRequests();
     }
-    const unsubscribe = dataService.subscribe(() => {
-      loadData();
-    });
-    return unsubscribe;
-  }, [isDistributor]);
+  }, [isDistributor, user?.role]);
 
   const handleOpenRedeem = (reward: Reward) => {
     if (isDistributor) {
@@ -124,65 +142,52 @@ export default function RewardsView({ onNavigateTab }: { onNavigateTab?: (tab: s
     }
 
     try {
-      const resp = await fetch('/api/sitesync/rewards/redeem', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          role: user?.role || 'dealer',
-          partnerId: user?.rawId || user?.dealerId || 'partner_01',
-          partnerName: user?.name || (user as any)?.shop_name || 'Authorized Partner',
+      await loyaltyApi.requestRedemption({
+        pointsRequested: selectedReward.points,
+        paymentDetails: {
           rewardId: selectedReward.id,
-          rewardTitle: selectedReward.title,
-          points: selectedReward.points,
-        }),
+          title: selectedReward.title,
+          category: selectedReward.category,
+        },
       });
 
-      const json = await resp.json();
-      if (!resp.ok || !json.success) {
-        throw new Error(json.message || 'Failed to submit redemption request.');
-      }
-
-      dataService.redeemReward(selectedReward.id);
       setIsConfirmOpen(false);
-      loadData();
+      await loadData();
 
       setToast({
         id: String(Date.now()),
         type: 'success',
-        message: `Redemption request for ${selectedReward.title} submitted! Awaiting Distributor approval.`,
+        message: `Redemption request for ${selectedReward.title} submitted! Awaiting administrator approval.`,
       });
     } catch (err: any) {
       console.error('Error redeeming reward:', err);
       setToast({
         id: String(Date.now()),
         type: 'error',
-        message: err.message || 'Failed to redeem reward.',
+        message: err.message || 'Failed to redeem reward. Check available points balance.',
       });
     }
   };
 
   const handleResolveRequest = async (id: string, action: 'approve' | 'reject') => {
     setActionLoadingId(id);
-    // Optimistic update
     setPartnerRequests((prev) =>
       prev.map((r) => (r.id === id ? { ...r, status: action === 'approve' ? 'approved' : 'rejected' } : r))
     );
 
     try {
-      const res = await fetch(`/api/sitesync/rewards/requests/${encodeURIComponent(id)}/resolve`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action }),
+      await loyaltyApi.resolveRedemption(id, {
+        status: action === 'approve' ? 'approved' : 'rejected',
+        rejectionReason: action === 'reject' ? 'Denied by administrator' : undefined,
       });
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        throw new Error(json.message || 'Failed to resolve redemption request.');
-      }
+
       setToast({
         id: String(Date.now()),
         type: 'success',
-        message: json.message || `Partner request ${action === 'approve' ? 'Approved' : 'Rejected'}!`,
+        message: `Partner request ${action === 'approve' ? 'Approved' : 'Rejected'}!`,
       });
+      await loadPartnerRequests();
+      await loadData();
     } catch (err: any) {
       console.error('Error resolving request:', err);
       setToast({
@@ -210,24 +215,16 @@ export default function RewardsView({ onNavigateTab }: { onNavigateTab?: (tab: s
 
     setIsSubmittingTier(true);
     try {
-      const res = await fetch('/api/sitesync/rewards', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: tierTitle.trim(),
-          category: tierCategory,
-          points: pointsNum,
-          description: tierDescription.trim() || `${tierCategory} incentive tier for authorized partners.`,
-          isPremium: tierIsPremium,
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        throw new Error(json.message || 'Failed to list reward tier.');
-      }
-
-      dataService.createReward(json.data);
-      await loadData();
+      const newReward: Reward = {
+        id: `REW-${Date.now()}`,
+        title: tierTitle.trim(),
+        category: tierCategory,
+        points: pointsNum,
+        description: tierDescription.trim() || `${tierCategory} incentive tier for authorized partners.`,
+        isPremium: tierIsPremium,
+      };
+      dataService.createReward(newReward);
+      setRewards(dataService.getRewards());
       setIsAddTierOpen(false);
       setTierTitle('');
       setTierPoints('1000');
@@ -236,7 +233,7 @@ export default function RewardsView({ onNavigateTab }: { onNavigateTab?: (tab: s
       setToast({
         id: String(Date.now()),
         type: 'success',
-        message: `Reward tier "${json.data.title}" successfully listed in partner catalog!`,
+        message: `Reward tier "${newReward.title}" successfully listed in partner catalog!`,
       });
     } catch (err: any) {
       setToast({ id: String(Date.now()), type: 'error', message: err.message || 'Error creating reward.' });
@@ -245,26 +242,14 @@ export default function RewardsView({ onNavigateTab }: { onNavigateTab?: (tab: s
     }
   };
 
-  const handleDeleteTier = async (rewardId: string, title: string) => {
-    if (!window.confirm(`Are you sure you want to remove the reward tier "${title}" from the catalog?`)) return;
-    try {
-      const res = await fetch(`/api/sitesync/rewards/${encodeURIComponent(rewardId)}`, {
-        method: 'DELETE',
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        throw new Error(json.message || 'Failed to remove reward tier.');
-      }
-      dataService.deleteReward(rewardId);
-      await loadData();
-      setToast({
-        id: String(Date.now()),
-        type: 'success',
-        message: `Reward tier "${title}" removed.`,
-      });
-    } catch (err: any) {
-      setToast({ id: String(Date.now()), type: 'error', message: err.message || 'Error deleting reward.' });
-    }
+  const handleDeleteTier = (rewardId: string, title: string) => {
+    dataService.deleteReward(rewardId);
+    setRewards(dataService.getRewards());
+    setToast({
+      id: String(Date.now()),
+      type: 'success',
+      message: `Reward tier "${title}" removed from catalog.`,
+    });
   };
 
   const getRewardIcon = (category: Reward['category']) => {
