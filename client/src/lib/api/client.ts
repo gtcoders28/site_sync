@@ -21,7 +21,7 @@ export class ApiError extends Error {
   }
 }
 
-type RequestOptions = Omit<RequestInit, 'body'> & { body?: unknown; skipRefresh?: boolean };
+type RequestOptions = Omit<RequestInit, 'body'> & { body?: unknown; skipRefresh?: boolean; params?: Record<string, unknown> };
 const baseUrl = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '');
 const ACCESS_TOKEN_KEY = 'sitesync_access_token';
 const REFRESH_TOKEN_KEY = 'sitesync_refresh_token';
@@ -76,8 +76,35 @@ const refreshAccessToken = async (): Promise<string | null> => {
 };
 
 const request = async <T>(path: string, options: RequestOptions = {}, retried = false): Promise<ApiResult<T>> => {
-  const { body, headers, skipRefresh = false, ...init } = options;
-  const response = await fetch(`${baseUrl}${path}`, {
+  const { body, headers, skipRefresh = false, params, ...init } = options;
+
+  if (!accessToken) {
+    try {
+      accessToken = localStorage.getItem(ACCESS_TOKEN_KEY);
+    } catch {}
+  }
+
+  // If no accessToken available and this is a protected endpoint, attempt refresh first
+  if (!accessToken && !path.startsWith('/auth/') && !skipRefresh && !retried) {
+    let storedRefresh: string | null = null;
+    try {
+      storedRefresh = localStorage.getItem(REFRESH_TOKEN_KEY);
+    } catch {}
+    if (storedRefresh) {
+      await refreshAccessToken();
+    }
+  }
+
+  let url = `${baseUrl}${path}`;
+  if (params) {
+    const searchParams = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '') searchParams.append(k, String(v));
+    });
+    const qs = searchParams.toString();
+    if (qs) url += (url.includes('?') ? '&' : '?') + qs;
+  }
+  const response = await fetch(url, {
     ...init,
     headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}), ...headers },
     body: body === undefined ? undefined : JSON.stringify(body), credentials: 'include',

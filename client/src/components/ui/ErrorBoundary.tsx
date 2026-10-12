@@ -1,4 +1,4 @@
-import React, { ReactNode } from 'react';
+import React, { Component, ReactNode, ErrorInfo } from 'react';
 import { ShieldAlert, RefreshCw } from 'lucide-react';
 
 interface Props {
@@ -9,14 +9,14 @@ interface State {
   hasError: boolean;
 }
 
-export class ErrorBoundary extends (React.Component as any) {
+export class ErrorBoundary extends Component<Props, State> {
   state: State = { hasError: false };
 
   static getDerivedStateFromError(_: Error): State {
     return { hasError: true };
   }
 
-  componentDidCatch(error: Error, errorInfo: any) {
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('Safe ErrorBoundary catch:', error, errorInfo);
   }
 

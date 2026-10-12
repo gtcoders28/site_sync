@@ -441,8 +441,8 @@ export default function RegistrationApprovalsView({
                           {isDealer ? 'Dealer Profile' : 'Customer Profile'}
                         </span>
 
-                        {/* Sub-category if present */}
-                        {req.category_or_type && (
+                        {/* Sub-category if present and not redundant */}
+                        {req.category_or_type && req.category_or_type.toLowerCase() !== 'customer' && (
                           <span className="text-[11px] font-medium text-slate-500 px-2 py-0.5 rounded bg-slate-100 border border-slate-200 capitalize">
                             {req.category_or_type}
                           </span>
@@ -461,15 +461,25 @@ export default function RegistrationApprovalsView({
                           {isPending && <Clock size={12} />}
                           {isApproved && <Check size={12} />}
                           {isRejected && <X size={12} />}
-                          <span className="capitalize">{req.status}</span>
+                          <span>
+                            {isApproved
+                              ? req.resolved_by_staff_name
+                                ? `Approved by Staff: ${req.resolved_by_staff_name}`
+                                : req.resolver_type === 'staff' || req.resolved_by_staff_id
+                                ? 'Approved by Staff'
+                                : 'Approved by You'
+                              : req.status === 'pending'
+                              ? 'Pending'
+                              : 'Rejected'}
+                          </span>
                         </span>
                       </div>
 
-                      {/* Subtitle Details: Owner, Phone, Location, Date */}
+                      {/* Subtitle Details: Owner (for dealers), Phone, Location, Date */}
                       <div className="flex flex-wrap items-center gap-y-1 gap-x-4 text-xs text-slate-500 pt-0.5">
-                        {req.owner_name && (
+                        {isDealer && req.owner_name && (
                           <span className="font-medium text-slate-700">
-                            Owner / Contact: <strong className="text-slate-900">{req.owner_name}</strong>
+                            Owner: <strong className="text-slate-900">{req.owner_name}</strong>
                           </span>
                         )}
 
@@ -536,14 +546,21 @@ export default function RegistrationApprovalsView({
 
                   {/* Right Status Details for Approved */}
                   {isApproved && (
-                    <div className="flex items-center gap-2 self-start lg:self-center shrink-0">
+                    <div className="flex items-center gap-2.5 self-start lg:self-center shrink-0">
                       <div className="text-right">
                         <span className="text-[11px] text-emerald-700 font-bold block">Verified & Active</span>
-                        <span className="text-[10px] text-slate-400">
+                        <span className="text-[11px] font-semibold text-slate-700 block">
+                          {req.resolved_by_staff_name
+                            ? `Approved by Staff: ${req.resolved_by_staff_name}`
+                            : req.resolver_type === 'staff' || req.resolved_by_staff_id
+                            ? 'Approved by Staff'
+                            : 'Approved by You'}
+                        </span>
+                        <span className="text-[10px] text-slate-400 block">
                           {req.resolved_at ? new Date(req.resolved_at).toLocaleDateString('en-US') : 'Resolved'}
                         </span>
                       </div>
-                      <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                      <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
                         <CheckCircle2 size={18} />
                       </div>
                     </div>
@@ -574,6 +591,11 @@ export default function RegistrationApprovalsView({
                             year: 'numeric',
                           })
                         : 'Resolved'}
+                      {req.resolved_by_staff_name
+                        ? ` • by Staff: ${req.resolved_by_staff_name}`
+                        : req.resolver_type === 'staff' || req.resolved_by_staff_id
+                        ? ' • by Staff'
+                        : ' • by You'}
                     </div>
                   </div>
                 )}

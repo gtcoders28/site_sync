@@ -13,30 +13,55 @@ import {
   CheckCircle2,
   FileSpreadsheet,
 } from 'lucide-react';
-import { dataService, Order, Invoice, Distributor } from '../../services/dataService';
+import { Order, Invoice, Distributor } from '../../services/dataService';
+import { ordersApi, usersApi } from '../../lib/api';
 import { formatINR, formatNumber } from '../../utils';
 import { Toast, ToastMessage } from '../ui/Toast';
 import { EmptyState } from '../ui/EmptyState';
 
 export default function AnalyticsReportsView() {
-  const [orders, setOrders] = useState<Order[]>(dataService.getOrders());
-  const [invoices, setInvoices] = useState<Invoice[]>(dataService.getInvoices());
-  const [distributors, setDistributors] = useState<Distributor[]>(dataService.getDistributors());
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [distributors, setDistributors] = useState<Distributor[]>([]);
   const [timeframe, setTimeframe] = useState<'month' | 'quarter' | 'ytd'>('month');
   const [toast, setToast] = useState<ToastMessage | null>(null);
 
-  const loadData = () => {
-    setOrders(dataService.getOrders());
-    setInvoices(dataService.getInvoices());
-    setDistributors(dataService.getDistributors());
+  const loadData = async () => {
+    try {
+      const [invRes, distRes] = await Promise.all([
+        ordersApi.getDistributorInvoices().catch(() => ({ success: true, data: [] })),
+        usersApi.getDistributors().catch(() => ({ success: true, data: [] })),
+      ]);
+      const rawInvoices = Array.isArray(invRes?.data) ? invRes.data : [];
+      const mappedOrders: Order[] = rawInvoices.map((inv: any) => ({
+        id: inv.invoice_number || inv.invoice_id?.slice(0, 8) || '#INV',
+        product: inv.dealer_name ? `Material Consignment: ${inv.dealer_name}` : 'Consignment Order',
+        dealer: inv.dealer_name || 'Regional Partner',
+        status: (inv.status === 'delivered' ? 'Delivered' : inv.status === 'dispatched' ? 'In Transit' : 'Processing') as Order['status'],
+        amount: Number(inv.total_amount || 0),
+        date: (inv.invoice_date || inv.created_at || '').slice(0, 10),
+        pointsEarned: 0,
+      }));
+      setOrders(mappedOrders);
+
+      const rawDist = Array.isArray(distRes?.data) ? distRes.data : [];
+      const mappedDist: Distributor[] = rawDist.map((d: any) => ({
+        id: d.distributor_id?.slice(0, 8) || 'DIST',
+        name: d.company_name || d.owner_name || 'Regional Distributor',
+        contact: d.mobile_number ? `+91 ${d.mobile_number}` : '',
+        joinedDate: (d.created_at || '').slice(0, 10),
+        status: (d.status === 'active' || d.status === 'Active' ? 'Active' : 'Pending') as any,
+        pointsEarned: 0,
+      }));
+      setDistributors(mappedDist);
+    } catch {
+      setOrders([]);
+      setDistributors([]);
+    }
   };
 
   useEffect(() => {
     loadData();
-    const unsubscribe = dataService.subscribe(() => {
-      loadData();
-    });
-    return unsubscribe;
   }, []);
 
   // Compute live analytics metrics

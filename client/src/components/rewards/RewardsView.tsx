@@ -460,64 +460,78 @@ export default function RewardsView({ onNavigateTab }: { onNavigateTab?: (tab: s
           </div>
 
           {/* Standard Rewards Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-            {rewards
-              .filter((r) => !r.isPremium)
-              .map((reward) => {
-                const canAfford = (profile?.pointsBalance || 0) >= reward.points;
-                return (
-                  <div
-                    key={reward.id}
-                    className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs hover:shadow-md transition-shadow flex flex-col justify-between space-y-6"
-                  >
-                    <div className="space-y-4">
-                      {getRewardIcon(reward.category)}
-                      <div>
-                        <h3 className="text-lg font-bold text-slate-900 tracking-tight">{reward.title}</h3>
-                        <p className="text-xs text-slate-500 mt-1 leading-relaxed">{reward.description}</p>
+          {rewards.length === 0 ? (
+            <div className="bg-white rounded-2xl p-8 border border-slate-200/80 shadow-xs text-center space-y-3">
+              <div className="w-12 h-12 rounded-xl bg-orange-50 text-orange-600 flex items-center justify-center mx-auto">
+                <Gift size={24} />
+              </div>
+              <h3 className="text-sm font-bold text-slate-800">No Reward Tiers Configured</h3>
+              <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                {isDistributor
+                  ? 'Click "Add Reward Tier" above to create cashback, discounts, or voucher programs for your network.'
+                  : 'Reward tiers configured by your regional distributor will appear here for redemption.'}
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              {rewards
+                .filter((r) => !r.isPremium)
+                .map((reward) => {
+                  const canAfford = (profile?.pointsBalance || 0) >= reward.points;
+                  return (
+                    <div
+                      key={reward.id}
+                      className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs hover:shadow-md transition-shadow flex flex-col justify-between space-y-6"
+                    >
+                      <div className="space-y-4">
+                        {getRewardIcon(reward.category)}
+                        <div>
+                          <h3 className="text-lg font-bold text-slate-900 tracking-tight">{reward.title}</h3>
+                          <p className="text-xs text-slate-500 mt-1 leading-relaxed">{reward.description}</p>
+                        </div>
                       </div>
-                    </div>
 
-                    <div className="flex items-center justify-between pt-4 border-t border-slate-100">
-                      <div>
-                        <span className="text-xl font-bold text-slate-900">
-                          {formatNumber(reward.points)}
-                        </span>
-                        <span className="text-xs font-semibold text-slate-400 ml-1">pts</span>
-                      </div>
-
-                      {isDistributor ? (
-                        <div className="flex items-center gap-2">
-                          <span className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200">
-                            Partner Tier
+                      <div className="flex items-center justify-between pt-4 border-t border-slate-100">
+                        <div>
+                          <span className="text-xl font-bold text-slate-900">
+                            {formatNumber(reward.points)}
                           </span>
+                          <span className="text-xs font-semibold text-slate-400 ml-1">pts</span>
+                        </div>
+
+                        {isDistributor ? (
+                          <div className="flex items-center gap-2">
+                            <span className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                              Partner Tier
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteTier(reward.id, reward.title)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                              title="Delete Reward Tier"
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          </div>
+                        ) : (
                           <button
                             type="button"
-                            onClick={() => handleDeleteTier(reward.id, reward.title)}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
-                            title="Delete Reward Tier"
+                            onClick={() => handleOpenRedeem(reward)}
+                            className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold shadow-2xs transition-all active:scale-[0.98] ${
+                              canAfford
+                                ? 'bg-slate-900 hover:bg-slate-800 text-white cursor-pointer'
+                                : 'bg-slate-100 text-slate-400 hover:bg-slate-200 cursor-pointer'
+                            }`}
                           >
-                            <Trash2 size={15} />
+                            Redeem
                           </button>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => handleOpenRedeem(reward)}
-                          className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold shadow-2xs transition-all active:scale-[0.98] ${
-                            canAfford
-                              ? 'bg-slate-900 hover:bg-slate-800 text-white cursor-pointer'
-                              : 'bg-slate-100 text-slate-400 hover:bg-slate-200 cursor-pointer'
-                          }`}
-                        >
-                          Redeem
-                        </button>
-                      )}
+                        )}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-          </div>
+                  );
+                })}
+            </div>
+          )}
 
           {/* Featured / Premium Reward Card */}
           {rewards

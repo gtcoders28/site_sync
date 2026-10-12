@@ -15,7 +15,7 @@ export type Dealer = {
   id: string; // e.g. DLR-992A
   shopName: string;
   ownerName: string;
-  type: 'Wholesale' | 'Retail' | 'Distributor';
+  type: 'Dealer' | 'Retailer' | 'Wholesale' | 'Retail' | 'Distributor';
   location: string;
   contact: string;
   orders: number;

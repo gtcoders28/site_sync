@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, Check, Search, X } from 'lucide-react';
 
@@ -70,14 +70,16 @@ export function SearchableSelect({
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
-  const [coords, setCoords] = useState<{ top: number; left: number; width: number; openUp: boolean }>({
-    top: 0,
-    left: 0,
-    width: 0,
-    openUp: false,
-  });
+  const [coords, setCoords] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    openUp: boolean;
+  } | null>(null);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const portalRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
 
   // Normalize options to { value, label }
@@ -106,22 +108,37 @@ export function SearchableSelect({
   }, [normalizedOptions, searchTerm, isOpen]);
 
   const updatePosition = () => {
-    if (!containerRef.current) return;
+    if (!containerRef.current) return null;
     const rect = containerRef.current.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) return null;
     const spaceBelow = window.innerHeight - rect.bottom;
     const menuHeight = 245;
     const openUp = spaceBelow < menuHeight && rect.top > menuHeight;
 
-    setCoords({
+    const calculatedWidth = Math.max(rect.width, 220);
+    const calculatedLeft = Math.max(8, Math.min(rect.left, window.innerWidth - calculatedWidth - 8));
+
+    const nextCoords = {
       top: openUp ? rect.top - 6 : rect.bottom + 6,
-      left: rect.left,
-      width: rect.width,
+      left: calculatedLeft,
+      width: calculatedWidth,
       openUp,
-    });
+    };
+    setCoords(nextCoords);
+    return nextCoords;
   };
 
-  useEffect(() => {
-    if (!isOpen) return;
+  const openMenu = () => {
+    if (disabled) return;
+    updatePosition();
+    setIsOpen(true);
+  };
+
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      setCoords(null);
+      return;
+    }
     updatePosition();
     const handleScrollOrResize = () => {
       updatePosition();
@@ -141,10 +158,11 @@ export function SearchableSelect({
       if (
         containerRef.current &&
         !containerRef.current.contains(target) &&
-        listRef.current &&
-        !listRef.current.contains(target)
+        portalRef.current &&
+        !portalRef.current.contains(target)
       ) {
         setIsOpen(false);
+        setCoords(null);
         // If current search term matches an option, keep it, otherwise revert or keep
         const match = normalizedOptions.find(
           (o) => o.label.toLowerCase() === searchTerm.toLowerCase()
@@ -179,6 +197,7 @@ export function SearchableSelect({
     onChange(option.value);
     setSearchTerm(option.label);
     setIsOpen(false);
+    setCoords(null);
     setHighlightedIndex(-1);
   };
 
@@ -188,7 +207,7 @@ export function SearchableSelect({
     if (!isOpen) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter') {
         e.preventDefault();
-        setIsOpen(true);
+        openMenu();
         setHighlightedIndex(0);
       }
       return;
@@ -213,6 +232,7 @@ export function SearchableSelect({
       }
     } else if (e.key === 'Escape') {
       setIsOpen(false);
+      setCoords(null);
     }
   };
 
@@ -229,12 +249,15 @@ export function SearchableSelect({
             const nextVal = e.target.value;
             setSearchTerm(nextVal);
             onChange(nextVal);
-            if (!isOpen) setIsOpen(true);
+            if (!isOpen) openMenu();
             setHighlightedIndex(0);
           }}
           onFocus={() => {
-            setIsOpen(true);
+            openMenu();
             setHighlightedIndex(-1);
+          }}
+          onClick={() => {
+            if (!isOpen) openMenu();
           }}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
@@ -267,8 +290,9 @@ export function SearchableSelect({
             onClick={() => {
               if (isOpen) {
                 setIsOpen(false);
+                setCoords(null);
               } else {
-                setIsOpen(true);
+                openMenu();
                 inputRef.current?.focus();
               }
             }}
@@ -286,17 +310,20 @@ export function SearchableSelect({
       {/* Dropdown Menu via Portal to prevent clipping */}
       {isOpen &&
         !disabled &&
+        coords &&
+        coords.width > 0 &&
         createPortal(
           <div
+            ref={portalRef}
             style={{
               position: 'fixed',
               top: `${coords.top}px`,
               left: `${coords.left}px`,
-              width: `${Math.max(coords.width, 220)}px`,
+              width: `${coords.width}px`,
               transform: coords.openUp ? 'translateY(-100%)' : 'none',
               zIndex: 9999,
             }}
-            className="bg-white rounded-xl border border-slate-200/90 shadow-2xl overflow-hidden py-1 max-h-60 flex flex-col animate-in fade-in zoom-in-95 duration-100"
+            className="bg-white rounded-xl border border-slate-200/90 shadow-2xl overflow-hidden py-1 max-h-60 flex flex-col animate-in fade-in duration-100"
           >
             <ul
               ref={listRef}

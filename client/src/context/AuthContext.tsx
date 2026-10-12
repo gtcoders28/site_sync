@@ -50,28 +50,54 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }, []);
 
   useEffect(() => {
+    apiClient.setSessionExpiredHandler(clearSession);
+    return () => {
+      apiClient.setSessionExpiredHandler(null);
+    };
+  }, [clearSession]);
+
+  useEffect(() => {
     let active = true;
 
     const restoreSession = async () => {
       try {
+        let currentToken: string | null = null;
+        try {
+          currentToken = localStorage.getItem('sitesync_access_token');
+        } catch {}
+
+        if (currentToken) {
+          apiClient.setAccessToken(currentToken);
+          try {
+            const profile = await authApi.me();
+            if (active) {
+              setUser(profile.data);
+              dataService.syncWithAuthenticatedUser(profile.data);
+              localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(profile.data));
+              return;
+            }
+          } catch {
+            // Access token might be expired, proceed to refresh
+          }
+        }
+
+        // Attempt token refresh
         const refresh = await authApi.refresh();
-        apiClient.setAccessToken(refresh.data.accessToken);
-        const profile = await authApi.me();
-        if (active) {
-          setUser(profile.data);
-          dataService.syncWithAuthenticatedUser(profile.data);
-          localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(profile.data));
+        if (refresh?.data?.accessToken) {
+          apiClient.setAccessToken(refresh.data.accessToken);
+          const profile = await authApi.me();
+          if (active) {
+            setUser(profile.data);
+            dataService.syncWithAuthenticatedUser(profile.data);
+            localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(profile.data));
+            return;
+          }
         }
       } catch (err) {
-        // If API fails, keep active session from localStorage
-        try {
-          const saved = localStorage.getItem(AUTH_STORAGE_KEY);
-          if (saved && active) {
-            const parsed = JSON.parse(saved);
-            setUser(parsed);
-            dataService.syncWithAuthenticatedUser(parsed);
-          }
-        } catch {}
+        // Refresh failed and cannot authenticate
+        if (active) {
+          clearSession();
+        }
       } finally {
         if (active) setIsLoading(false);
       }
@@ -81,7 +107,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [clearSession]);
 
   const acceptAuthentication = useCallback((result: AuthResult) => {
     const tokens = result.data.tokens;

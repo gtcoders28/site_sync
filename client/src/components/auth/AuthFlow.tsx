@@ -11,6 +11,7 @@ import {
   AlertCircle,
   Sparkles,
   RefreshCw,
+  UserCheck,
 } from 'lucide-react';
 import { ApiError } from '../../lib/api/client';
 import { authApi, type AuthResult, type PublicRole, type AuthenticatedUser } from '../../lib/api/auth';
@@ -27,13 +28,14 @@ const AUTH_ROLES = [
   { id: 'distributor', label: 'Distributor', icon: Building2, activeColor: 'text-slate-900', loginOnly: true },
   { id: 'dealer', label: 'Dealer', icon: Store, activeColor: 'text-orange-600', loginOnly: false },
   { id: 'retailer', label: 'Retailer', icon: Store, activeColor: 'text-emerald-600', loginOnly: false },
+  { id: 'staff', label: 'Staff Member', icon: UserCheck, activeColor: 'text-amber-600', loginOnly: true },
   { id: 'influencer', label: 'Influencer', icon: Megaphone, activeColor: 'text-purple-600', loginOnly: false },
   { id: 'customer', label: 'Customer', icon: UserCircle2, activeColor: 'text-blue-600', loginOnly: false },
 ] as const;
 
 export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
   const [isLogin, setIsLogin] = useState(true);
-  const [role, setRole] = useState<'distributor' | 'dealer' | 'retailer' | 'customer' | 'influencer'>('distributor');
+  const [role, setRole] = useState<'distributor' | 'dealer' | 'retailer' | 'staff' | 'customer' | 'influencer'>('distributor');
   const [step, setStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
@@ -52,7 +54,7 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
   // Dealer / Retailer Specific
   const [distributorId, setDistributorId] = useState('');
   const [shopName, setShopName] = useState('');
-  const [dealerType, setDealerType] = useState('both');
+  const [dealerType, setDealerType] = useState<'dealer' | 'retailer'>('dealer');
 
   // Customer Specific
   const [onboardingDealerId, setOnboardingDealerId] = useState('');
@@ -159,7 +161,7 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
           password,
           shopName: shopName.trim() || name.trim() || 'Metro Materials Firm',
           ownerName: ownerName.trim() || name.trim() || 'Authorized Partner',
-          dealerType: dealerType || (role === 'retailer' ? 'retailer' : 'both'),
+          dealerType: (role === 'retailer' || dealerType === 'retailer') ? 'retailer' : 'dealer',
           gstNumber: gstNumber.trim() || undefined,
           city: city.trim() || 'Delhi',
           state: stateName.trim() || 'Delhi',
@@ -192,7 +194,7 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
         };
       }
 
-      const result = await authApi.signUp(role as Exclude<PublicRole, 'distributor'>, payload);
+      const result = await authApi.signUp(role as Exclude<PublicRole, 'distributor' | 'staff'>, payload);
       setSuccessMessage(result.message || 'Registration completed successfully!');
       if (result.data?.tokens?.accessToken) {
         onAuthenticated(result);
@@ -429,11 +431,10 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
                             </label>
                             <CustomDropdown
                               value={dealerType}
-                              onChange={setDealerType}
+                              onChange={(val) => setDealerType(val as 'dealer' | 'retailer')}
                               options={[
-                                { value: 'both', label: 'Wholesale & Retail' },
-                                { value: 'wholesaler', label: 'Wholesale Hub Only' },
-                                { value: 'retailer', label: 'Retail Counter Only' },
+                                { value: 'dealer', label: 'Dealer' },
+                                { value: 'retailer', label: 'Retailer' },
                               ]}
                               className="w-full"
                               buttonClassName="w-full py-2.5"
@@ -475,7 +476,7 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
 
                         <div>
                           <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                            Associated Wholesale Dealer (Optional)
+                            Associated Dealer (Optional)
                           </label>
                           <CustomDropdown
                             value={onboardingDealerId}
@@ -536,7 +537,7 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
 
                         <div>
                           <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                            Associated Wholesale Dealer *
+                            Associated Dealer *
                           </label>
                           <CustomDropdown
                             value={dealerId}

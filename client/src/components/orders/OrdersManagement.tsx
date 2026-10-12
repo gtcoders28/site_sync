@@ -159,7 +159,7 @@ export default function OrdersManagement() {
       return;
     }
 
-    const targetDealer = user?.dealerId || selectedDealerId || (dealers.length > 0 ? dealers[0].dealer_id : null);
+    const targetDealer = user?.dealerId || user?.id || selectedDealerId || (dealers.length > 0 ? dealers[0].dealer_id : null);
     if (!targetDealer) {
       setToast({ id: String(Date.now()), type: 'error', message: 'Please select or onboard a dealer first.' });
       return;

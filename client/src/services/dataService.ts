@@ -96,7 +96,7 @@ export interface Dealer {
   id: string; // e.g. DLR-992A
   shopName: string;
   ownerName: string;
-  type: 'Wholesale' | 'Retail' | 'Distributor';
+  type: 'Dealer' | 'Retailer' | 'Wholesale' | 'Retail' | 'Distributor';
   location: string;
   contact: string;
   orders: number;
@@ -156,9 +156,9 @@ const INITIAL_LEDGER: LedgerItem[] = [];
 const INITIAL_ACTIVITY: AccountActivity[] = [];
 
 const INITIAL_PROFILE: UserProfile = {
-  id: 'USR-8025',
-  name: 'Enterprise User',
-  role: 'Regional Partner',
+  id: '',
+  name: '',
+  role: '',
   kycStatus: 'Verified',
   email: '',
   phone: '',
@@ -166,37 +166,7 @@ const INITIAL_PROFILE: UserProfile = {
   pointsBalance: 0,
 };
 
-const INITIAL_REWARDS: Reward[] = [
-  {
-    id: 'REW-01',
-    title: '₹500 Direct Cashback',
-    points: 1000,
-    description: 'Get ₹500 directly transferred to your registered bank account with instant settlement.',
-    category: 'cashback',
-  },
-  {
-    id: 'REW-02',
-    title: '10% Order Discount',
-    points: 1500,
-    description: 'Apply a 10% discount coupon on your next bulk material order up to ₹50,000.',
-    category: 'discount',
-  },
-  {
-    id: 'REW-03',
-    title: 'Amazon Gift Voucher',
-    points: 2200,
-    description: '₹1000 Amazon Pay gift card, instantly delivered to your verified primary email.',
-    category: 'voucher',
-  },
-  {
-    id: 'REW-04',
-    title: '₹2000 Off Construction Materials',
-    points: 3500,
-    description: 'Exclusive mega-discount on cement, TMT bars, or premium aggregates.',
-    category: 'materials',
-    isPremium: true,
-  },
-];
+const INITIAL_REWARDS: Reward[] = [];
 
 // ==========================================
 // ROLE & USER DATA SCOPING ENGINE (v3)
@@ -666,7 +636,8 @@ export const dataService = {
 
   // ===== REWARDS & REDEMPTIONS =====
   getRewards(): Reward[] {
-    return readStorage<Reward[]>('sitesync_rewards_catalog', INITIAL_REWARDS);
+    const list = readStorage<Reward[]>('sitesync_rewards_catalog', INITIAL_REWARDS);
+    return list.filter((r) => !['REW-01', 'REW-02', 'REW-03', 'REW-04'].includes(r.id));
   },
 
   createReward(reward: Reward): Reward {
@@ -764,8 +735,8 @@ export const dataService = {
     const roleLabels: Record<string, string> = {
       platform_owner_distributor: 'Platform Owner',
       distributor: 'Regional Distributor',
-      dealer: 'Authorized Wholesale Dealer',
-      retailer: 'Retail Store Partner',
+      dealer: 'Authorized Dealer',
+      retailer: 'Retail Partner',
       influencer: 'Contractor & Site Engineer',
       customer: 'Valued Client Partner',
     };

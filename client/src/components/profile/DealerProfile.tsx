@@ -4,12 +4,17 @@ import { formatINR, formatNumber } from '../../utils';
 import { useAuth } from '../../context/AuthContext';
 import { Modal } from '../ui/Modal';
 import { Toast, ToastMessage } from '../ui/Toast';
-import { analyticsApi, loyaltyApi } from '../../lib/api';
+import { analyticsApi, loyaltyApi, usersApi } from '../../lib/api';
 
 export default function DealerProfile() {
   const { user } = useAuth();
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const [loading, setLoading] = useState(false);
+
+  const isRetailer =
+    user?.role === 'retailer' ||
+    (user as any)?.dealer_type === 'retailer' ||
+    Boolean((user as any)?.parent_dealer_id);
 
   // Live Metrics from Database
   const [totalPurchases, setTotalPurchases] = useState(0);
@@ -23,7 +28,8 @@ export default function DealerProfile() {
   const [email, setEmail] = useState('');
   const [address, setAddress] = useState('');
   const [gstNumber, setGstNumber] = useState('');
-  const [distributorName, setDistributorName] = useState('');
+  const [parentName, setParentName] = useState('');
+  const [parentType, setParentType] = useState<'dealer' | 'distributor'>('distributor');
 
   // Edit Profile Modal State
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -32,9 +38,9 @@ export default function DealerProfile() {
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   const [distroMessage, setDistroMessage] = useState('');
 
-  const syncUserFields = () => {
+  const syncUserFields = async () => {
     if (user) {
-      setShopName((user.shop_name as string) || (user.name as string) || 'Registered Dealership');
+      setShopName((user.shop_name as string) || (user.name as string) || (isRetailer ? 'Registered Retailer' : 'Registered Dealership'));
       setOwnerName((user.owner_name as string) || (user.name as string) || 'Business Owner');
       setPhone(user.mobile_number ? `+91 ${user.mobile_number}` : 'Not Provided');
       setEmail((user.email as string) || 'Not Provided');
@@ -44,7 +50,51 @@ export default function DealerProfile() {
           : 'Address Not Provided'
       );
       setGstNumber((user.gst_number as string) || 'Not Registered');
-      setDistributorName((user.distributor_name as string) || 'Assigned Regional Distributor');
+
+      // Check if parent dealer is specified
+      const userParentDealerId = (user as any).parent_dealer_id || (user as any).parentDealerId;
+      const userDistributorId = (user as any).distributor_id || user.distributorId;
+      const directDistributorName = (user as any).distributor_name as string;
+      const directParentDealerName = (user as any).parent_dealer_name as string;
+
+      if (directParentDealerName) {
+        setParentName(directParentDealerName);
+        setParentType('dealer');
+      } else if (directDistributorName) {
+        setParentName(directDistributorName);
+        setParentType('distributor');
+      } else if (userParentDealerId) {
+        setParentType('dealer');
+        try {
+          const dealersRes = await usersApi.getDealers();
+          const dealersList = Array.isArray(dealersRes?.data) ? dealersRes.data : [];
+          const parent = dealersList.find((d: any) => d.dealer_id === userParentDealerId);
+          if (parent) {
+            setParentName(parent.shop_name || parent.owner_name || 'Assigned Wholesale Dealer');
+          } else {
+            setParentName('Assigned Wholesale Dealer');
+          }
+        } catch {
+          setParentName('Assigned Wholesale Dealer');
+        }
+      } else if (userDistributorId) {
+        setParentType('distributor');
+        try {
+          const distRes = await usersApi.getDistributors();
+          const distList = Array.isArray(distRes?.data) ? distRes.data : [];
+          const parent = distList.find((d: any) => d.distributor_id === userDistributorId);
+          if (parent) {
+            setParentName(parent.company_name || parent.owner_name || 'Assigned Regional Distributor');
+          } else {
+            setParentName('Assigned Regional Distributor');
+          }
+        } catch {
+          setParentName('Assigned Regional Distributor');
+        }
+      } else {
+        setParentType(isRetailer ? 'dealer' : 'distributor');
+        setParentName(isRetailer ? 'Assigned Wholesale Dealer' : 'Assigned Regional Distributor');
+      }
     }
   };
 
@@ -94,6 +144,9 @@ export default function DealerProfile() {
     });
   };
 
+  const parentLabel = parentType === 'dealer' ? 'Assigned Wholesale Dealer' : 'Assigned Regional Distributor';
+  const parentContactLabel = parentType === 'dealer' ? 'Contact Wholesale Dealer' : 'Contact Distributor Hub';
+
   const handleSendMessageToHub = (e: React.FormEvent) => {
     e.preventDefault();
     if (!distroMessage.trim()) return;
@@ -102,7 +155,7 @@ export default function DealerProfile() {
     setToast({
       id: String(Date.now()),
       type: 'success',
-      message: `Dispatch inquiry transmitted to ${distributorName}.`,
+      message: `Dispatch inquiry transmitted to ${parentName}.`,
     });
   };
 
@@ -112,8 +165,14 @@ export default function DealerProfile() {
 
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-6 border-b border-slate-200">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">Dealer Profile</h1>
-          <p className="text-slate-500 text-sm mt-1">Manage your storefront details, primary distributor link, and verified metrics.</p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">
+            {isRetailer ? 'Retailer Profile' : 'Dealer Profile'}
+          </h1>
+          <p className="text-slate-500 text-sm mt-1">
+            {isRetailer
+              ? 'Manage your retail storefront details, assigned wholesale dealer or distributor, and verified metrics.'
+              : 'Manage your storefront details, primary distributor link, and verified metrics.'}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -146,7 +205,9 @@ export default function DealerProfile() {
               <Building2 size={36} />
             </div>
 
-            <h2 className="text-2xl font-bold text-slate-900 mb-2">{shopName || 'Dealer Storefront'}</h2>
+            <h2 className="text-2xl font-bold text-slate-900 mb-2">
+              {shopName || (isRetailer ? 'Retail Storefront' : 'Dealer Storefront')}
+            </h2>
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 mb-6">
               <CheckCircle2 size={13} className="text-emerald-500" />
               Verified Enterprise Partner
@@ -167,9 +228,9 @@ export default function DealerProfile() {
               </div>
               <div>
                 <p className="font-bold text-slate-400 uppercase tracking-wider text-[10px] mb-0.5">
-                  DEALER CLASSIFICATION
+                  PROFILE CLASSIFICATION
                 </p>
-                <p className="text-sm font-semibold text-slate-800">Authorized Wholesale Partner</p>
+                <p className="text-sm font-semibold text-slate-800">{isRetailer ? 'Retailer' : 'Dealer'}</p>
               </div>
             </div>
           </div>
@@ -179,11 +240,13 @@ export default function DealerProfile() {
               <Truck size={120} className="-mr-6 -mt-6" />
             </div>
             <h3 className="text-xs font-bold flex items-center gap-2 mb-2 text-orange-400 uppercase tracking-wider">
-              Assigned Regional Distributor
+              {parentLabel}
             </h3>
-            <p className="text-lg font-bold mb-1">{distributorName}</p>
+            <p className="text-lg font-bold mb-1">{parentName}</p>
             <p className="text-xs text-slate-300 mb-4 leading-relaxed">
-              Direct dispatch with priority turn-around SLA and automated billing clearance.
+              {parentType === 'dealer'
+                ? 'Assigned wholesale dealer partner providing direct regional stock fulfilment and local consignment delivery.'
+                : 'Direct dispatch with priority turn-around SLA and automated billing clearance.'}
             </p>
             <button
               type="button"
@@ -191,7 +254,7 @@ export default function DealerProfile() {
               className="w-full bg-orange-600 hover:bg-orange-700 text-white py-2 rounded-xl text-xs font-bold transition-colors shadow-xs flex items-center justify-center gap-2 cursor-pointer"
             >
               <MessageSquare size={14} />
-              <span>Contact Distributor Hub</span>
+              <span>{parentContactLabel}</span>
             </button>
           </div>
         </div>
@@ -359,12 +422,12 @@ export default function DealerProfile() {
         </form>
       </Modal>
 
-      {/* Contact Distro Hub Modal */}
+      {/* Contact Parent Hub Modal */}
       <Modal
         isOpen={isContactModalOpen}
         onClose={() => setIsContactModalOpen(false)}
-        title={`Contact ${distributorName}`}
-        description="Transmit operational logistics dispatch requests or invoice inquiries."
+        title={`Contact ${parentName}`}
+        description={`Transmit operational logistics dispatch requests or stock inquiries to your ${parentLabel.toLowerCase()}.`}
       >
         <form onSubmit={handleSendMessageToHub} className="space-y-4">
           <div>

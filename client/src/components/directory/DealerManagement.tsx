@@ -23,7 +23,7 @@ export default function DealerManagement() {
   // New Dealer Form State
   const [newShopName, setNewShopName] = useState('');
   const [newOwnerName, setNewOwnerName] = useState('');
-  const [newType, setNewType] = useState<'Wholesale' | 'Retail' | 'Distributor'>('Wholesale');
+  const [newType, setNewType] = useState<'Dealer' | 'Retailer'>('Dealer');
   const [newCity, setNewCity] = useState('');
   const [newState, setNewState] = useState('');
   const [newContact, setNewContact] = useState('');
@@ -47,7 +47,7 @@ export default function DealerManagement() {
         rawId: d.dealer_id,
         shopName: d.shop_name || 'Regional Dealership',
         ownerName: d.owner_name || 'Authorized Partner',
-        type: (d.dealer_type === 'distributor' ? 'Distributor' : d.dealer_type === 'retailer' ? 'Retail' : 'Wholesale') as Dealer['type'],
+        type: (d.dealer_type === 'distributor' ? 'Distributor' : d.dealer_type === 'retailer' ? 'Retailer' : 'Dealer') as Dealer['type'],
         location: `${d.city || 'Regional Center'}, ${d.state || 'India'}`,
         contact: d.mobile_number ? `+91 ${d.mobile_number}` : 'Unlisted',
         orders: 0,
@@ -103,8 +103,11 @@ export default function DealerManagement() {
 
     setIsSubmitting(true);
     try {
+      const isDealerUser = user?.role === 'dealer';
       let distId = user?.distributorId || (user as any)?.distributor_id || (user?.role?.includes('distributor') ? user?.id : null);
-      if (!distId) {
+      let parentDealerId: string | null = isDealerUser ? (user?.dealerId || user?.id || null) : null;
+
+      if (!distId && !parentDealerId) {
         const publicDists = await usersApi.getDistributors().catch(() => ({ success: true, data: [] }));
         const distList = Array.isArray(publicDists?.data) ? publicDists.data : [];
         if (distList.length > 0) {
@@ -112,18 +115,13 @@ export default function DealerManagement() {
         }
       }
 
-      if (!distId) {
-        setModalError('No active distributor found to link this dealer.');
+      if (!distId && !parentDealerId) {
+        setModalError('No active distributor or parent dealer found to link this business.');
         setIsSubmitting(false);
         return;
       }
 
-      const mappedType =
-        newType.toLowerCase() === 'retail'
-          ? 'retailer'
-          : newType.toLowerCase() === 'both'
-          ? 'both'
-          : 'wholesaler';
+      const mappedType = newType.toLowerCase() === 'retailer' || newType.toLowerCase() === 'retail' ? 'retailer' : 'dealer';
 
       await authApi.signUp('dealer', {
         shopName: newShopName.trim(),
@@ -132,9 +130,10 @@ export default function DealerManagement() {
         city: newCity.trim(),
         state: newState.trim(),
         mobileNumber: cleanContact,
-        distributorId: distId,
+        distributorId: distId || undefined,
+        parentDealerId: parentDealerId || undefined,
         password: newPassword,
-        source: 'created_by_distributor',
+        source: isDealerUser ? 'created_by_dealer' : 'created_by_distributor',
       });
 
       setIsAddModalOpen(false);
@@ -220,8 +219,8 @@ export default function DealerManagement() {
   });
 
   const activeDealersCount = dealers.filter((d) => d.status === 'Active').length;
-  const wholesaleCount = dealers.filter((d) => d.type === 'Wholesale').length;
-  const retailCount = dealers.filter((d) => d.type === 'Retail').length;
+  const dealerCount = dealers.filter((d) => d.type === 'Dealer' || d.type === 'Wholesale').length;
+  const retailerCount = dealers.filter((d) => d.type === 'Retailer' || d.type === 'Retail').length;
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full space-y-6 animate-in fade-in duration-300">
@@ -230,7 +229,7 @@ export default function DealerManagement() {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">Dealer Directory</h1>
-          <p className="text-slate-500 text-sm mt-1">Manage and monitor authorized wholesale dealers and stockists across your network.</p>
+          <p className="text-slate-500 text-sm mt-1">Manage and monitor authorized dealers and retailers across your network.</p>
         </div>
         <div className="flex items-center gap-3 w-full md:w-auto">
           <button
@@ -257,14 +256,14 @@ export default function DealerManagement() {
           <p className="text-xs text-slate-500 mt-0.5">Verified & Ordering</p>
         </div>
         <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs">
-          <p className="text-[11px] font-bold text-orange-600 uppercase tracking-wider mb-1">WHOLESALE MERCHANTS</p>
-          <p className="text-2xl font-black text-orange-700">{wholesaleCount}</p>
-          <p className="text-xs text-slate-500 mt-0.5">Bulk Yards & Distributors</p>
+          <p className="text-[11px] font-bold text-orange-600 uppercase tracking-wider mb-1">DEALERS</p>
+          <p className="text-2xl font-black text-orange-700">{dealerCount}</p>
+          <p className="text-xs text-slate-500 mt-0.5">Authorized Dealers</p>
         </div>
         <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs">
-          <p className="text-[11px] font-bold text-blue-600 uppercase tracking-wider mb-1">RETAIL COUNTERS</p>
-          <p className="text-2xl font-black text-blue-700">{retailCount}</p>
-          <p className="text-xs text-slate-500 mt-0.5">Storefront Shops</p>
+          <p className="text-[11px] font-bold text-blue-600 uppercase tracking-wider mb-1">RETAILERS</p>
+          <p className="text-2xl font-black text-blue-700">{retailerCount}</p>
+          <p className="text-xs text-slate-500 mt-0.5">Retail Partners</p>
         </div>
       </div>
 
@@ -369,8 +368,8 @@ export default function DealerManagement() {
                         </a>
                       </td>
                       <td className="px-4 lg:px-5 py-4 whitespace-nowrap">
-                        <span className={`text-xs px-2.5 py-1 rounded-full font-bold border ${dealer.type === 'Wholesale' ? 'bg-orange-50 text-orange-800 border-orange-200' : 'bg-blue-50 text-blue-800 border-blue-200'}`}>
-                          {dealer.type}
+                        <span className={`text-xs px-2.5 py-1 rounded-full font-bold border ${dealer.type === 'Dealer' || dealer.type === 'Wholesale' ? 'bg-orange-50 text-orange-800 border-orange-200' : 'bg-blue-50 text-blue-800 border-blue-200'}`}>
+                          {dealer.type === 'Wholesale' ? 'Dealer' : dealer.type === 'Retail' ? 'Retailer' : dealer.type}
                         </span>
                       </td>
                       <td className="px-4 lg:px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{dealer.location}</td>
@@ -467,9 +466,8 @@ export default function DealerManagement() {
                 value={newType}
                 onChange={(val) => setNewType(val as any)}
                 options={[
-                  { value: 'Wholesale', label: 'Wholesale' },
-                  { value: 'Retail', label: 'Retail' },
-                  { value: 'Distributor', label: 'Distributor Hub' },
+                  { value: 'Dealer', label: 'Dealer' },
+                  { value: 'Retailer', label: 'Retailer' },
                 ]}
                 className="w-full"
                 buttonClassName="w-full py-2.5"

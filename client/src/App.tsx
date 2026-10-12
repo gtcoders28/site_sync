@@ -8,6 +8,7 @@ import EnterpriseLayout from './components/layouts/EnterpriseLayout';
 import PartnerLayout from './components/layouts/PartnerLayout';
 import DealerLayout from './components/layouts/DealerLayout';
 import InfluencerLayout from './components/layouts/InfluencerLayout';
+import StaffLayout from './components/layouts/StaffLayout';
 import AuthFlow from './components/auth/AuthFlow';
 import { useAuth } from './context/AuthContext';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
@@ -32,6 +33,8 @@ export default function App() {
         return <DealerLayout onLogout={() => void signOut()} isRetailer={false} />;
       case 'retailer':
         return <DealerLayout onLogout={() => void signOut()} isRetailer={true} />;
+      case 'staff':
+        return <StaffLayout onLogout={() => void signOut()} />;
       case 'influencer':
         return <InfluencerLayout onLogout={() => void signOut()} />;
       case 'customer':

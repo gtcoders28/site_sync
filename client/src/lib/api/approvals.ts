@@ -10,6 +10,10 @@ export interface RegistrationApprovalRequest {
   rejection_reason?: string | null;
   requested_at: string;
   resolved_at?: string | null;
+  resolved_by_staff_id?: string | null;
+  resolved_by_user_id?: string | null;
+  resolved_by_staff_name?: string | null;
+  resolver_type?: string | null;
   requester_name?: string;
   owner_name?: string;
   requester_mobile?: string;
@@ -51,6 +55,22 @@ export const approvalsApi = {
       resolvedAt: string;
     }>(`/approvals/${requestId}/resolve`, {
       action,
+      rejectionReason: rejectionReason?.trim() || undefined,
+    }),
+
+  approveRequest: (requestId: string) =>
+    apiClient.post<{
+      success: boolean;
+      request_id: string;
+      status: string;
+    }>(`/approvals/registration-requests/${requestId}/approve`),
+
+  rejectRequest: (requestId: string, rejectionReason?: string) =>
+    apiClient.post<{
+      success: boolean;
+      requestId: string;
+      status: string;
+    }>(`/approvals/registration-requests/${requestId}/reject`, {
       rejectionReason: rejectionReason?.trim() || undefined,
     }),
 };

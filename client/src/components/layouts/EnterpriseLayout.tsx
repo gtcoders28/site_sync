@@ -22,6 +22,8 @@ import {
   Plus,
   BellOff,
   UserCheck,
+  UserCog,
+  FileCheck2,
 } from 'lucide-react';
 import { usersApi, ordersApi } from '../../lib/api';
 import { motion, AnimatePresence } from 'motion/react';
@@ -36,6 +38,8 @@ import OrdersManagement from '../orders/OrdersManagement';
 import ProductManagement from '../inventory/ProductManagement';
 import InvoiceWorkspace from '../billing/InvoiceWorkspace';
 import RegistrationApprovalsView from '../approvals/RegistrationApprovalsView';
+import StaffManagement from '../staff/StaffManagement';
+import PendingInvoiceApprovals from '../billing/PendingInvoiceApprovals';
 import { dataService, UserProfile } from '../../services/dataService';
 import { useAuth } from '../../context/AuthContext';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
@@ -63,10 +67,12 @@ const NAV_SECTIONS: NavSection[] = [
     title: 'NETWORK & DIRECTORY',
     items: [
       { id: 'approvals', label: 'Registration Approvals', icon: UserCheck },
+      { id: 'staff', label: 'Manage Staff', icon: UserCog },
       { id: 'distributor', label: 'Distributor Network', icon: Network },
       { id: 'dealer', label: 'Dealer Directory', icon: Store },
       { id: 'customer', label: 'Customer Base', icon: Users },
       { id: 'invoices', label: 'Invoices & Billing', icon: Receipt },
+      { id: 'invoice-approvals', label: 'Pending Invoice Approvals', icon: FileCheck2 },
     ],
   },
   {
@@ -185,6 +191,10 @@ export default function EnterpriseLayout({ onLogout }: { onLogout: () => void })
         return <DashboardView onNavigateTab={(tab) => setActiveTab(tab)} />;
       case 'approvals':
         return <RegistrationApprovalsView />;
+      case 'staff':
+        return <StaffManagement />;
+      case 'invoice-approvals':
+        return <PendingInvoiceApprovals mode="distributor" />;
       case 'distributor':
       case 'referral':
       case 'referrals':

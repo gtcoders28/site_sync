@@ -18,6 +18,8 @@ import {
   PanelLeftOpen,
   BellOff,
   UserCheck,
+  UserCog,
+  FileCheck2,
 } from 'lucide-react';
 import { ordersApi, usersApi } from '../../lib/api';
 import { motion, AnimatePresence } from 'motion/react';
@@ -29,6 +31,8 @@ import CustomerManagement from '../directory/CustomerManagement';
 import InvoiceWorkspace from '../billing/InvoiceWorkspace';
 import RewardsView from '../rewards/RewardsView';
 import RegistrationApprovalsView from '../approvals/RegistrationApprovalsView';
+import StaffManagement from '../staff/StaffManagement';
+import PendingInvoiceApprovals from '../billing/PendingInvoiceApprovals';
 import { useAuth } from '../../context/AuthContext';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 
@@ -50,12 +54,14 @@ const DEALER_NAV_SECTIONS: NavSection[] = [
       { id: 'orders', label: 'Wholesale Orders', icon: Truck },
       { id: 'inventory', label: 'Inventory Catalog', icon: Package },
       { id: 'invoices', label: 'Customer Invoices', icon: Receipt },
+      { id: 'invoice-approvals', label: 'Pending Approvals', icon: FileCheck2 },
     ],
   },
   {
     title: 'NETWORK & LOYALTY',
     items: [
       { id: 'customers', label: 'My Customers', icon: Users },
+      { id: 'staff', label: 'Manage Staff', icon: UserCog },
       { id: 'approvals', label: 'Customer Approvals', icon: UserCheck },
       { id: 'rewards', label: 'Rewards & Points', icon: Award },
       { id: 'profile', label: 'Store Profile', icon: UserCircle },
@@ -153,10 +159,14 @@ export default function DealerLayout({ onLogout, isRetailer = false }: { onLogou
         return <ProductManagement />;
       case 'customers':
         return <CustomerManagement />;
+      case 'staff':
+        return <StaffManagement />;
       case 'approvals':
         return <RegistrationApprovalsView initialRequesterType="customer" />;
       case 'invoices':
         return <InvoiceWorkspace mode="dealer" />;
+      case 'invoice-approvals':
+        return <PendingInvoiceApprovals mode="dealer" />;
       case 'rewards':
         return <RewardsView onNavigateTab={(tab) => setActiveTab(tab)} />;
       case 'profile':
@@ -282,7 +292,15 @@ export default function DealerLayout({ onLogout, isRetailer = false }: { onLogou
                             : 'text-slate-400 group-hover:text-slate-200 shrink-0'
                         }
                       />
-                      {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
+                      {!sidebarCollapsed && (
+                        <span className="truncate">
+                          {item.id === 'profile'
+                            ? isRetailer
+                              ? 'Retailer Profile'
+                              : 'Dealer Profile'
+                            : item.label}
+                        </span>
+                      )}
                     </div>
                     {!sidebarCollapsed && item.badge && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-300 font-bold">
@@ -445,7 +463,13 @@ export default function DealerLayout({ onLogout, isRetailer = false }: { onLogou
                           : 'text-slate-500'
                       }
                     />
-                    <span>{item.label}</span>
+                    <span>
+                      {item.id === 'profile'
+                        ? isRetailer
+                          ? 'Retailer Profile'
+                          : 'Dealer Profile'
+                        : item.label}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -480,7 +504,7 @@ export default function DealerLayout({ onLogout, isRetailer = false }: { onLogou
             {/* Breadcrumb / Active Context Indicator */}
             <div className="flex items-center gap-2 text-xs font-semibold text-slate-400 shrink-0">
               <span className="hover:text-slate-700 cursor-pointer hidden sm:inline" onClick={() => setActiveTab('dashboard')}>
-                {isRetailer ? 'Retail Store' : 'Wholesale Dealer'}
+                {isRetailer ? 'Retailer' : 'Dealer'}
               </span>
               <ChevronRight size={13} className="text-slate-300 hidden sm:inline" />
               <div className="flex items-center gap-1.5 text-slate-900 font-bold bg-slate-100/90 px-3 py-1 rounded-lg border border-slate-200/70 shadow-2xs">
@@ -586,7 +610,7 @@ export default function DealerLayout({ onLogout, isRetailer = false }: { onLogou
               }`}
             >
               <ShieldCheck size={14} className={isRetailer ? 'text-emerald-600' : 'text-orange-600'} />
-              <span>{isRetailer ? 'Retail Store' : 'Wholesale Dealer'}</span>
+              <span>{isRetailer ? 'Retailer' : 'Dealer'}</span>
             </div>
 
             {/* User Avatar + Nav */}

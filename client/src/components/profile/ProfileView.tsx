@@ -164,7 +164,7 @@ export default function ProfileView({ mode = 'all' }: { mode?: 'all' | 'profile'
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div className="flex items-center gap-2 text-slate-900 font-bold text-lg">
             <Store className="text-orange-600" size={22} />
-            <span>Assigned Wholesale Dealer</span>
+            <span>Assigned Dealer</span>
           </div>
           <button
             type="button"
@@ -259,7 +259,7 @@ export default function ProfileView({ mode = 'all' }: { mode?: 'all' | 'profile'
         <div>
           <h3 className="text-base font-bold text-slate-900">No Assigned Dealer Yet</h3>
           <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto leading-relaxed">
-            Your account currently operates directly. An authorized wholesale partner can be assigned to provide same-day localized dispatches.
+            Your account currently operates directly. An authorized dealer can be assigned to provide same-day localized dispatches.
           </p>
         </div>
       </div>
@@ -380,7 +380,7 @@ export default function ProfileView({ mode = 'all' }: { mode?: 'all' | 'profile'
           </h1>
           <p className="text-slate-500 text-sm mt-1">
             {mode === 'dealer'
-              ? 'Connect directly with your authorized wholesale supplier for local dispatches and technical assistance.'
+              ? 'Connect directly with your authorized dealer for local dispatches and technical assistance.'
               : 'Manage your verified business credentials, delivery addresses, and account security.'}
           </p>
         </div>

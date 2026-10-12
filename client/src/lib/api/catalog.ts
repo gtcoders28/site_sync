@@ -15,24 +15,35 @@ export interface Category {
 
 export interface Product {
   product_id: string;
-  distributor_id: string;
+  distributor_id?: string | null;
   category_id: string;
   brand_id: string;
   variant_name: string;
   unit: string;
   unit_price: number;
+  hsn_sac_code?: string;
+  gst_rate?: number;
   attributes?: Record<string, any>;
   status: 'active' | 'discontinued';
   brand_name?: string;
   category_name?: string;
+  // Aliases for compatibility
+  productId?: string;
+  name?: string;
+  price?: number;
+  hsnSacCode?: string;
+  gstRate?: number;
 }
 
 export interface CreateProductPayload {
+  distributorId?: string | null;
   categoryId: string;
   brandId: string;
   variantName: string;
   unit: string;
   unitPrice: number;
+  hsnSacCode?: string;
+  gstRate?: number;
   attributes?: Record<string, any>;
 }
 
@@ -40,6 +51,8 @@ export interface UpdateProductPayload {
   variantName?: string;
   unit?: string;
   unitPrice?: number;
+  hsnSacCode?: string;
+  gstRate?: number;
   attributes?: Record<string, any>;
   status?: 'active' | 'discontinued';
 }

@@ -13,6 +13,10 @@ import { usersApi, authApi } from '../../lib/api';
 
 export default function CustomerManagement() {
   const { user } = useAuth();
+  const isDealerOrRetailer =
+    user?.role === 'dealer' ||
+    user?.role === 'retailer' ||
+    (user?.role === 'staff' && user?.employerType === 'dealer');
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [dealerFilter, setDealerFilter] = useState('');
@@ -289,7 +293,7 @@ export default function CustomerManagement() {
                   <th className="px-4 lg:px-5 py-3.5">Customer ID</th>
                   <th className="px-4 lg:px-5 py-3.5">Customer Name</th>
                   <th className="px-4 lg:px-5 py-3.5">Mobile</th>
-                  <th className="px-4 lg:px-5 py-3.5">Assigned Dealer</th>
+                  {!isDealerOrRetailer && <th className="px-4 lg:px-5 py-3.5">Assigned Dealer</th>}
                   <th className="px-4 lg:px-5 py-3.5">City</th>
                   <th className="px-4 lg:px-5 py-3.5">Status</th>
                   <th className="px-4 lg:px-5 py-3.5 text-right">Total Value</th>
@@ -336,7 +340,9 @@ export default function CustomerManagement() {
                           {customer.mobile}
                         </a>
                       </td>
-                      <td className="px-4 lg:px-5 py-4 text-sm text-slate-700 font-medium whitespace-nowrap">{customer.assignedDealer}</td>
+                      {!isDealerOrRetailer && (
+                        <td className="px-4 lg:px-5 py-4 text-sm text-slate-700 font-medium whitespace-nowrap">{customer.assignedDealer}</td>
+                      )}
                       <td className="px-4 lg:px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{customer.city}</td>
                       <td className="px-4 lg:px-5 py-4 whitespace-nowrap">
                         <StatusPillDropdown
@@ -470,54 +476,94 @@ export default function CustomerManagement() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                Assigned Dealer
-              </label>
-              <input
-                type="text"
-                placeholder="e.g. Metro Hardware"
-                value={newAssignedDealer}
-                onChange={(e) => setNewAssignedDealer(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-sm"
-              />
+          {isDealerOrRetailer ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Registration Source
+                </label>
+                <CustomDropdown
+                  value={newSource}
+                  onChange={(val) => setNewSource(val as any)}
+                  options={[
+                    { value: 'DEALER', label: 'Dealer Onboarded', dotColor: 'bg-emerald-500' },
+                    { value: 'SELF', label: 'Self Registered', dotColor: 'bg-blue-500' },
+                    { value: 'DISTRIBUTOR', label: 'Distributor Hub', dotColor: 'bg-purple-500' },
+                  ]}
+                  className="w-full"
+                  buttonClassName="w-full py-2.5"
+                  menuClassName="w-full"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Initial Status
+                </label>
+                <CustomDropdown
+                  value={newStatus}
+                  onChange={(val) => setNewStatus(val as any)}
+                  options={[
+                    { value: 'Active', label: 'Active', dotColor: 'bg-emerald-500' },
+                    { value: 'Pending', label: 'Pending', dotColor: 'bg-amber-500' },
+                  ]}
+                  className="w-full"
+                  buttonClassName="w-full py-2.5"
+                  menuClassName="w-full"
+                />
+              </div>
             </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                Registration Source
-              </label>
-              <CustomDropdown
-                value={newSource}
-                onChange={(val) => setNewSource(val as any)}
-                options={[
-                  { value: 'DEALER', label: 'Dealer Onboarded', dotColor: 'bg-emerald-500' },
-                  { value: 'SELF', label: 'Self Registered', dotColor: 'bg-blue-500' },
-                  { value: 'DISTRIBUTOR', label: 'Distributor Hub', dotColor: 'bg-purple-500' },
-                ]}
-                className="w-full"
-                buttonClassName="w-full py-2.5"
-                menuClassName="w-full"
-              />
-            </div>
-          </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Assigned Dealer
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Metro Hardware"
+                    value={newAssignedDealer}
+                    onChange={(e) => setNewAssignedDealer(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Registration Source
+                  </label>
+                  <CustomDropdown
+                    value={newSource}
+                    onChange={(val) => setNewSource(val as any)}
+                    options={[
+                      { value: 'DEALER', label: 'Dealer Onboarded', dotColor: 'bg-emerald-500' },
+                      { value: 'SELF', label: 'Self Registered', dotColor: 'bg-blue-500' },
+                      { value: 'DISTRIBUTOR', label: 'Distributor Hub', dotColor: 'bg-purple-500' },
+                    ]}
+                    className="w-full"
+                    buttonClassName="w-full py-2.5"
+                    menuClassName="w-full"
+                  />
+                </div>
+              </div>
 
-          <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-              Initial Status
-            </label>
-            <CustomDropdown
-              value={newStatus}
-              onChange={(val) => setNewStatus(val as any)}
-              options={[
-                { value: 'Active', label: 'Active', dotColor: 'bg-emerald-500' },
-                { value: 'Pending', label: 'Pending', dotColor: 'bg-amber-500' },
-              ]}
-              className="w-full"
-              buttonClassName="w-full py-2.5"
-              menuClassName="w-full"
-            />
-          </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Initial Status
+                </label>
+                <CustomDropdown
+                  value={newStatus}
+                  onChange={(val) => setNewStatus(val as any)}
+                  options={[
+                    { value: 'Active', label: 'Active', dotColor: 'bg-emerald-500' },
+                    { value: 'Pending', label: 'Pending', dotColor: 'bg-amber-500' },
+                  ]}
+                  className="w-full"
+                  buttonClassName="w-full py-2.5"
+                  menuClassName="w-full"
+                />
+              </div>
+            </>
+          )}
 
           <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
             <button
