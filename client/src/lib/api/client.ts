@@ -22,7 +22,7 @@ export class ApiError extends Error {
 }
 
 type RequestOptions = Omit<RequestInit, 'body'> & { body?: unknown; skipRefresh?: boolean; params?: Record<string, unknown> };
-const baseUrl = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '');
+const baseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000').replace(/\/$/, '');
 const ACCESS_TOKEN_KEY = 'sitesync_access_token';
 const REFRESH_TOKEN_KEY = 'sitesync_refresh_token';
 

@@ -6,7 +6,6 @@ import { defineConfig } from 'vite';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
 
 export default defineConfig(() => {
   return {
@@ -19,7 +18,7 @@ export default defineConfig(() => {
     server: {
       proxy: {
         '/api/v1': {
-          target: API_BASE_URL,
+          target: 'http://localhost:5000',
           changeOrigin: true,
           secure: false,
         },
