@@ -22,6 +22,27 @@ export class ApprovalsController {
       next(err);
     }
   }
+
+  async approveRequest(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const requestId = req.params.requestId as string;
+      const result = await approvalsService.resolveRequest(requestId, { action: 'approve' }, req.user as UserContext);
+      APIResponse.success(res, 'Registration request approved successfully', result);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async rejectRequest(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const requestId = req.params.requestId as string;
+      const rejectionReason = req.body?.rejectionReason || null;
+      const result = await approvalsService.resolveRequest(requestId, { action: 'reject', rejectionReason }, req.user as UserContext);
+      APIResponse.success(res, 'Registration request rejected', result);
+    } catch (err) {
+      next(err);
+    }
+  }
 }
 
 export const approvalsController = new ApprovalsController();

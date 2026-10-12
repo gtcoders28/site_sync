@@ -6,9 +6,11 @@ export const ROLES = {
   PLATFORM_OWNER_DISTRIBUTOR: 'platform_owner_distributor',
   DISTRIBUTOR: 'distributor',
   DEALER: 'dealer',
+  RETAILER: 'retailer',
   CUSTOMER: 'customer',
   INFLUENCER: 'influencer',
-  // Future roles
+  STAFF: 'staff',
+  // Legacy / future aliases
   DISTRIBUTOR_STAFF: 'distributor_staff',
   DEALER_STAFF: 'dealer_staff',
 } as const;
@@ -29,9 +31,8 @@ export const DEALER_STATUS = {
 } as const;
 
 export const DEALER_TYPE = {
-  WHOLESALER: 'wholesaler',
+  DEALER: 'dealer',
   RETAILER: 'retailer',
-  BOTH: 'both',
 } as const;
 
 export const DEALER_SOURCE = {
@@ -50,6 +51,24 @@ export const CUSTOMER_CREATED_BY_TYPE = {
   DEALER: 'dealer',
   DISTRIBUTOR: 'distributor',
   SELF: 'self',
+  STAFF: 'staff',
+} as const;
+
+export const STAFF_STATUS = {
+  ACTIVE: 'active',
+  INACTIVE: 'inactive',
+  SUSPENDED: 'suspended',
+} as const;
+
+export const STAFF_EMPLOYER_TYPE = {
+  DISTRIBUTOR: 'distributor',
+  DEALER: 'dealer',
+} as const;
+
+export const INVOICE_APPROVAL_STATUS = {
+  PENDING_APPROVAL: 'pending_approval',
+  APPROVED: 'approved',
+  REJECTED: 'rejected',
 } as const;
 
 export const INFLUENCER_STATUS = {
@@ -75,7 +94,11 @@ export const PURCHASE_STATUS = {
 } as const;
 
 export const INVOICE_STATUS = {
+  DRAFT: 'draft',
+  PENDING_APPROVAL: 'pending_approval',
+  APPROVED: 'approved',
   PENDING: 'pending',
+  DISPATCHED: 'dispatched',
   DELIVERED: 'delivered',
   CANCELLED: 'cancelled',
 } as const;

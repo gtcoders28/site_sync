@@ -156,7 +156,7 @@ export class AuthService {
   }
 
   /**
-   * Register a new Dealer (self-registered or created by distributor)
+   * Register a new Dealer or Retailer (self-registered or created by distributor/dealer)
    */
   async signUpDealer(data: any, creatorUser?: UserContext | null) {
     const {
@@ -180,19 +180,32 @@ export class AuthService {
 
     await this._assertMobileUnique(mobileNumber);
 
-    // Verify distributor exists
-    const distRes = await query('SELECT distributor_id, status FROM distributors WHERE distributor_id = $1', [distributorId]);
-    if (distRes.rows.length === 0) {
-      throw APIError.badRequest('Assigned distributor does not exist');
+    // Validate that at least one parent exists (distributor_id or parent_dealer_id)
+    if (!distributorId && !parentDealerId) {
+      throw APIError.badRequest('Every dealer or retailer must have an assigned distributor or parent dealer.');
+    }
+
+    if (distributorId) {
+      const distRes = await query('SELECT distributor_id, status FROM distributors WHERE distributor_id = $1', [distributorId]);
+      if (distRes.rows.length === 0) {
+        throw APIError.badRequest('Assigned distributor does not exist');
+      }
+    }
+
+    if (parentDealerId) {
+      const parentDlrRes = await query('SELECT dealer_id, status FROM dealers WHERE dealer_id = $1', [parentDealerId]);
+      if (parentDlrRes.rows.length === 0) {
+        throw APIError.badRequest('Assigned parent dealer does not exist');
+      }
     }
 
     // Determine status & source
     let status: string = DEALER_STATUS.PENDING;
     let actualSource = source;
 
-    if (creatorUser && (creatorUser.role === ROLES.DISTRIBUTOR || creatorUser.isPlatformOwner)) {
+    if (creatorUser && (creatorUser.role === ROLES.DISTRIBUTOR || creatorUser.isPlatformOwner || creatorUser.role === ROLES.DEALER || creatorUser.role === ROLES.RETAILER)) {
       status = DEALER_STATUS.ACTIVE;
-      actualSource = 'created_by_distributor';
+      actualSource = creatorUser.role === ROLES.DISTRIBUTOR || creatorUser.isPlatformOwner ? 'created_by_distributor' : 'created_by_dealer';
     } else {
       status = DEALER_STATUS.PENDING;
       actualSource = 'self_registered';
@@ -214,7 +227,7 @@ export class AuthService {
       `;
 
       const dealerRes = await client.query(insertQuery, [
-        distributorId,
+        distributorId || null,
         parentDealerId || null,
         mobileNumber,
         hashedPassword,
@@ -236,28 +249,31 @@ export class AuthService {
 
       const dealer = dealerRes.rows[0];
 
-      // If self-registered, create a pending registration request for the parent distributor
+      // If self-registered, create a pending registration request for the parent
       if (status === DEALER_STATUS.PENDING) {
+        const parentType = distributorId ? 'distributor' : 'dealer';
+        const parentId = distributorId || parentDealerId;
         await client.query(
           `INSERT INTO registration_requests (
             requester_type, requester_id, parent_type, parent_id, status
           ) VALUES ($1, $2, $3, $4, $5)`,
-          ['dealer', dealer.dealer_id, 'distributor', distributorId, 'pending']
+          ['dealer', dealer.dealer_id, parentType, parentId, 'pending']
         );
       }
 
       let tokens = null;
+      const actualRole = dealer.dealer_type === 'retailer' ? ROLES.RETAILER : ROLES.DEALER;
       if (status === DEALER_STATUS.ACTIVE) {
         tokens = this._generateTokens({
           userId: dealer.dealer_id,
-          role: ROLES.DEALER,
+          role: actualRole,
           dealerId: dealer.dealer_id,
           distributorId: dealer.distributor_id,
         });
       }
 
       return {
-        user: { ...dealer, role: ROLES.DEALER },
+        user: { ...dealer, role: actualRole },
         tokens,
         requiresApproval: status === DEALER_STATUS.PENDING,
       };
@@ -298,10 +314,11 @@ export class AuthService {
     let status: string = CUSTOMER_STATUS.PENDING;
     let actualCreatedByType = createdByType;
     let createdById = null;
+    let createdByStaffId = null;
     let resolvedOnboardingDealerId = onboardingDealerId || null;
 
     if (creatorUser) {
-      if (creatorUser.role === ROLES.DEALER) {
+      if (creatorUser.role === ROLES.DEALER || creatorUser.role === ROLES.RETAILER) {
         status = CUSTOMER_STATUS.ACTIVE;
         actualCreatedByType = 'dealer';
         createdById = creatorUser.entityId;
@@ -310,6 +327,12 @@ export class AuthService {
         status = CUSTOMER_STATUS.ACTIVE;
         actualCreatedByType = 'distributor';
         createdById = creatorUser.entityId;
+      } else if (creatorUser.role === ROLES.STAFF) {
+        status = CUSTOMER_STATUS.PENDING;
+        actualCreatedByType = 'staff';
+        createdById = creatorUser.employerId;
+        createdByStaffId = creatorUser.id;
+        resolvedOnboardingDealerId = resolvedOnboardingDealerId || creatorUser.dealerId || null;
       }
     } else {
       status = CUSTOMER_STATUS.PENDING;
@@ -324,10 +347,10 @@ export class AuthService {
         INSERT INTO customers (
           mobile_number, password_hash, name, email, address, aadhar_number,
           city, state, pincode, referral_code, referred_by_customer_id,
-          created_by_type, created_by_id, onboarding_dealer_id, status
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+          created_by_type, created_by_id, onboarding_dealer_id, status, created_by_staff_id
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
         RETURNING customer_id, mobile_number, name, email, referral_code, 
-                  referred_by_customer_id, onboarding_dealer_id, status, created_at;
+                  referred_by_customer_id, onboarding_dealer_id, status, created_by_staff_id, created_at;
       `;
 
       const custRes = await client.query(insertQuery, [
@@ -346,12 +369,14 @@ export class AuthService {
         createdById,
         resolvedOnboardingDealerId,
         status,
+        createdByStaffId,
       ]);
 
       const customer = custRes.rows[0];
 
       // If self-registered and onboardingDealerId is present, create registration_requests record
-      if (status === CUSTOMER_STATUS.PENDING && resolvedOnboardingDealerId) {
+      // (For staff-created pending customers, DB trigger trg_customer_staff_approval_queue queues it automatically)
+      if (status === CUSTOMER_STATUS.PENDING && resolvedOnboardingDealerId && actualCreatedByType === 'self') {
         await client.query(
           `INSERT INTO registration_requests (
             requester_type, requester_id, parent_type, parent_id, status
@@ -441,7 +466,7 @@ export class AuthService {
   }
 
   /**
-   * Universal Sign In for all profiles
+   * Universal Sign In for all profiles (Distributor, Dealer, Staff, Customer, Influencer)
    */
   async signIn({ mobileNumber, password, role }: { mobileNumber: string; password: string; role?: string }) {
     let userRow: any = null;
@@ -460,11 +485,12 @@ export class AuthService {
         )
       );
     }
-    if (!role || role === ROLES.DEALER) {
+    if (!role || role === ROLES.DEALER || role === ROLES.RETAILER) {
       searches.push(
         query(
           `SELECT dealer_id AS id, distributor_id, parent_dealer_id, mobile_number, password_hash, 
-                  shop_name, owner_name, dealer_type, invite_code, status, 'dealer' as detected_role 
+                  shop_name, owner_name, dealer_type, invite_code, status, 
+                  (CASE WHEN dealer_type = 'retailer' THEN 'retailer' ELSE 'dealer' END) as detected_role 
            FROM dealers WHERE mobile_number = $1`,
           [mobileNumber]
         )
@@ -486,6 +512,16 @@ export class AuthService {
           `SELECT influencer_id AS id, distributor_id, dealer_id, mobile_number, password_hash, 
                   name, referral_code, status, 'influencer' as detected_role 
            FROM influencers WHERE mobile_number = $1`,
+          [mobileNumber]
+        )
+      );
+    }
+    if (!role || role === ROLES.STAFF || role === 'staff') {
+      searches.push(
+        query(
+          `SELECT staff_id AS id, employer_type, distributor_id, dealer_id, full_name, mobile_number, 
+                  password_hash, email, role, can_create_invoices, can_approve_registrations, status, 'staff' as detected_role 
+           FROM staff WHERE mobile_number = $1`,
           [mobileNumber]
         )
       );
@@ -526,16 +562,35 @@ export class AuthService {
     delete userRow.password_hash;
     delete userRow.detected_role;
 
+    const permissions = userRole === 'staff' ? {
+      canCreateInvoices: userRow.can_create_invoices === true,
+      canApproveRegistrations: userRow.can_approve_registrations === true,
+    } : undefined;
+
+    const isDealerOrRetailer = userRole === ROLES.DEALER || userRole === ROLES.RETAILER;
+
     const tokens = this._generateTokens({
       userId: userRow.id,
       role: userRole as string,
       isPlatformOwner,
       distributorId: userRow.distributor_id || (userRole === ROLES.DISTRIBUTOR || isPlatformOwner ? userRow.id : null),
-      dealerId: userRow.dealer_id || (userRole === ROLES.DEALER ? userRow.id : null),
+      dealerId: userRow.dealer_id || (isDealerOrRetailer ? userRow.id : null),
+      employerType: userRow.employer_type || null,
+      employerId: userRow.employer_type === 'distributor' ? userRow.distributor_id : (userRow.dealer_id || null),
+      permissions,
     });
 
     return {
-      user: { ...userRow, role: userRole, isPlatformOwner },
+      user: {
+        ...userRow,
+        role: userRole,
+        isPlatformOwner,
+        employerType: userRow.employer_type || null,
+        employerId: userRow.employer_type === 'distributor' ? userRow.distributor_id : (userRow.dealer_id || null),
+        permissions,
+        can_create_invoices: userRow.can_create_invoices,
+        can_approve_registrations: userRow.can_approve_registrations,
+      },
       tokens,
     };
   }
@@ -558,7 +613,7 @@ export class AuthService {
     if (role === ROLES.PLATFORM_OWNER_DISTRIBUTOR || role === ROLES.DISTRIBUTOR) {
       const res = await query('SELECT distributor_id AS id, is_platform_owner, status FROM distributors WHERE distributor_id = $1', [userId]);
       userRow = res.rows[0];
-    } else if (role === ROLES.DEALER) {
+    } else if (role === ROLES.DEALER || role === ROLES.RETAILER) {
       const res = await query('SELECT dealer_id AS id, distributor_id, status FROM dealers WHERE dealer_id = $1', [userId]);
       userRow = res.rows[0];
     } else if (role === ROLES.CUSTOMER) {
@@ -567,17 +622,28 @@ export class AuthService {
     } else if (role === ROLES.INFLUENCER) {
       const res = await query('SELECT influencer_id AS id, status FROM influencers WHERE influencer_id = $1', [userId]);
       userRow = res.rows[0];
+    } else if (role === ROLES.STAFF || role === 'staff') {
+      const res = await query('SELECT staff_id AS id, employer_type, distributor_id, dealer_id, can_create_invoices, can_approve_registrations, status FROM staff WHERE staff_id = $1', [userId]);
+      userRow = res.rows[0];
     }
 
     if (!userRow || userRow.status !== 'active') {
       throw APIError.unauthorized('Account no longer valid or active');
     }
 
+    const isDealerOrRetailer = role === ROLES.DEALER || role === ROLES.RETAILER;
     const newTokens = this._generateTokens({
       userId: userRow.id,
       role,
       isPlatformOwner: userRow.is_platform_owner || false,
-      distributorId: userRow.distributor_id || null,
+      distributorId: userRow.distributor_id || (role === ROLES.DISTRIBUTOR || userRow.is_platform_owner ? userRow.id : null),
+      dealerId: userRow.dealer_id || (isDealerOrRetailer ? userRow.id : null),
+      employerType: userRow.employer_type || null,
+      employerId: userRow.employer_type === 'distributor' ? userRow.distributor_id : (userRow.dealer_id || null),
+      permissions: role === ROLES.STAFF ? {
+        canCreateInvoices: userRow.can_create_invoices === true,
+        canApproveRegistrations: userRow.can_approve_registrations === true,
+      } : undefined,
     });
 
     return newTokens;
@@ -590,14 +656,15 @@ export class AuthService {
   }
 
   async _assertMobileUnique(mobileNumber: string): Promise<void> {
-    const [distRes, dlrRes, custRes, infRes] = await Promise.all([
+    const [distRes, dlrRes, custRes, infRes, staffRes] = await Promise.all([
       query('SELECT distributor_id FROM distributors WHERE mobile_number = $1', [mobileNumber]),
       query('SELECT dealer_id FROM dealers WHERE mobile_number = $1', [mobileNumber]),
       query('SELECT customer_id FROM customers WHERE mobile_number = $1', [mobileNumber]),
       query('SELECT influencer_id FROM influencers WHERE mobile_number = $1', [mobileNumber]),
+      query('SELECT staff_id FROM staff WHERE mobile_number = $1', [mobileNumber]),
     ]);
 
-    if (distRes.rows.length || dlrRes.rows.length || custRes.rows.length || infRes.rows.length) {
+    if (distRes.rows.length || dlrRes.rows.length || custRes.rows.length || infRes.rows.length || staffRes.rows.length) {
       throw APIError.conflict(`Mobile number ${mobileNumber} is already registered in the system`, 'MOBILE_ALREADY_EXISTS');
     }
   }

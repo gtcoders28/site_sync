@@ -20,7 +20,7 @@ router.get('/distributors', requirePlatformOwner, validate(listUsersQuerySchema,
 // Dealers list (Platform owner or Distributor for their dealers, or Dealer for self)
 router.get(
   '/dealers',
-  authorizeRoles(ROLES.PLATFORM_OWNER_DISTRIBUTOR, ROLES.DISTRIBUTOR, ROLES.DEALER),
+  authorizeRoles(ROLES.PLATFORM_OWNER_DISTRIBUTOR, ROLES.DISTRIBUTOR, ROLES.DEALER, ROLES.RETAILER, ROLES.STAFF),
   validate(listUsersQuerySchema, 'query'),
   usersController.getDealers
 );
@@ -28,7 +28,7 @@ router.get(
 // Customers list
 router.get(
   '/customers',
-  authorizeRoles(ROLES.PLATFORM_OWNER_DISTRIBUTOR, ROLES.DISTRIBUTOR, ROLES.DEALER, ROLES.CUSTOMER),
+  authorizeRoles(ROLES.PLATFORM_OWNER_DISTRIBUTOR, ROLES.DISTRIBUTOR, ROLES.DEALER, ROLES.RETAILER, ROLES.CUSTOMER, ROLES.STAFF),
   validate(listUsersQuerySchema, 'query'),
   usersController.getCustomers
 );
@@ -36,7 +36,7 @@ router.get(
 // Influencers list
 router.get(
   '/influencers',
-  authorizeRoles(ROLES.PLATFORM_OWNER_DISTRIBUTOR, ROLES.DISTRIBUTOR, ROLES.DEALER, ROLES.INFLUENCER),
+  authorizeRoles(ROLES.PLATFORM_OWNER_DISTRIBUTOR, ROLES.DISTRIBUTOR, ROLES.DEALER, ROLES.RETAILER, ROLES.INFLUENCER),
   validate(listUsersQuerySchema, 'query'),
   usersController.getInfluencers
 );
@@ -54,7 +54,7 @@ router.delete(
 // Delete Customer (Platform Owner, Distributor, or Dealer)
 router.delete(
   '/customers/:customerId',
-  authorizeRoles(ROLES.PLATFORM_OWNER_DISTRIBUTOR, ROLES.DISTRIBUTOR, ROLES.DEALER),
+  authorizeRoles(ROLES.PLATFORM_OWNER_DISTRIBUTOR, ROLES.DISTRIBUTOR, ROLES.DEALER, ROLES.RETAILER),
   usersController.deleteCustomer
 );
 

@@ -83,7 +83,7 @@ export class InventoryService {
         const clause = ` AND d.distributor_id = $${params.length}`;
         countSql += clause;
         dataSql += clause;
-      } else if (currentUser.role === ROLES.DEALER) {
+      } else if (currentUser.role === ROLES.DEALER || currentUser.role === ROLES.RETAILER) {
         // Only own inventory
         params.push(currentUser.dealerId);
         const clause = ` AND inv.dealer_id = $${params.length}`;
@@ -149,7 +149,7 @@ export class InventoryService {
         const clause = ` AND (m.owner_type = $${params.length - 1} AND m.owner_id = $${params.length})`;
         countSql += clause;
         dataSql += clause;
-      } else if (currentUser.role === ROLES.DEALER) {
+      } else if (currentUser.role === ROLES.DEALER || currentUser.role === ROLES.RETAILER) {
         params.push('dealer');
         params.push(currentUser.dealerId);
         const clause = ` AND (m.owner_type = $${params.length - 1} AND m.owner_id = $${params.length})`;
@@ -202,7 +202,7 @@ export class InventoryService {
    */
   async manualAdjustment({ productId, quantityChange, notes }: { productId: string; quantityChange: number; notes: string }, currentUser: UserContext) {
     const isDistributor = currentUser.role === ROLES.DISTRIBUTOR || currentUser.isPlatformOwner;
-    const isDealer = currentUser.role === ROLES.DEALER;
+    const isDealer = currentUser.role === ROLES.DEALER || currentUser.role === ROLES.RETAILER;
 
     if (!isDistributor && !isDealer) {
       throw APIError.forbidden('Only distributors and dealers can perform manual stock adjustments.');

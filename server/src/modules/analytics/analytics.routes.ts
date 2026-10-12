@@ -13,7 +13,7 @@ router.use(authenticate);
 // Dealer analytics (own metrics or accessed by parent distributor)
 router.get(
   '/dealer',
-  authorizeRoles(ROLES.PLATFORM_OWNER_DISTRIBUTOR, ROLES.DISTRIBUTOR, ROLES.DEALER),
+  authorizeRoles(ROLES.PLATFORM_OWNER_DISTRIBUTOR, ROLES.DISTRIBUTOR, ROLES.DEALER, ROLES.RETAILER),
   validate(analyticsQuerySchema, 'query'),
   analyticsController.getDealerAnalytics
 );

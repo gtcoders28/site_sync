@@ -22,8 +22,10 @@ router.post('/login', authRateLimiter, validate(signInSchema), authController.si
 // Role-Specific Sign In
 router.post('/distributor/signin', authRateLimiter, validate(signInSchema), authController.signInDistributor);
 router.post('/dealer/signin', authRateLimiter, validate(signInSchema), authController.signInDealer);
+router.post('/retailer/signin', authRateLimiter, validate(signInSchema), authController.signInRetailer);
 router.post('/customer/signin', authRateLimiter, validate(signInSchema), authController.signInCustomer);
 router.post('/influencer/signin', authRateLimiter, validate(signInSchema), authController.signInInfluencer);
+router.post('/staff/signin', authRateLimiter, validate(signInSchema), authController.signInStaff);
 
 // Platform Owner ONLY: Create Regional Distributor (no public self-registration)
 router.post(

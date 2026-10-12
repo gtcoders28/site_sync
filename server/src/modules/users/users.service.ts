@@ -74,12 +74,24 @@ export class UsersService {
         const clause = ` AND d.distributor_id = $${params.length}`;
         countSql += clause;
         dataSql += clause;
-      } else if (currentUser.role === ROLES.DEALER) {
-        // Dealer can only see themselves
+      } else if (currentUser.role === ROLES.DEALER || currentUser.role === ROLES.RETAILER) {
+        // Dealer can see themselves AND any downstream retailers linked to them
         params.push(currentUser.dealerId);
-        const clause = ` AND d.dealer_id = $${params.length}`;
+        const clause = ` AND (d.dealer_id = $${params.length} OR d.parent_dealer_id = $${params.length})`;
         countSql += clause;
         dataSql += clause;
+      } else if (currentUser.role === ROLES.STAFF) {
+        if (currentUser.employerType === 'distributor') {
+          params.push(currentUser.employerId);
+          const clause = ` AND d.distributor_id = $${params.length}`;
+          countSql += clause;
+          dataSql += clause;
+        } else {
+          params.push(currentUser.employerId);
+          const clause = ` AND (d.dealer_id = $${params.length} OR d.parent_dealer_id = $${params.length})`;
+          countSql += clause;
+          dataSql += clause;
+        }
       } else {
         throw APIError.forbidden('Access denied to dealer records');
       }
@@ -146,12 +158,24 @@ export class UsersService {
         const clause = ` AND (d.distributor_id = $${params.length} OR (c.created_by_type = 'distributor' AND c.created_by_id = $${params.length}))`;
         countSql += clause;
         dataSql += clause;
-      } else if (currentUser.role === ROLES.DEALER) {
+      } else if (currentUser.role === ROLES.DEALER || currentUser.role === ROLES.RETAILER) {
         // Dealer only sees their customers
         params.push(currentUser.dealerId);
         const clause = ` AND c.onboarding_dealer_id = $${params.length}`;
         countSql += clause;
         dataSql += clause;
+      } else if (currentUser.role === ROLES.STAFF) {
+        if (currentUser.employerType === 'distributor') {
+          params.push(currentUser.employerId);
+          const clause = ` AND (d.distributor_id = $${params.length} OR (c.created_by_type = 'distributor' AND c.created_by_id = $${params.length}))`;
+          countSql += clause;
+          dataSql += clause;
+        } else {
+          params.push(currentUser.employerId);
+          const clause = ` AND c.onboarding_dealer_id = $${params.length}`;
+          countSql += clause;
+          dataSql += clause;
+        }
       } else if (currentUser.role === ROLES.CUSTOMER) {
         // Customer only sees themselves
         params.push(currentUser.id);
@@ -223,7 +247,7 @@ export class UsersService {
         const clause = ` AND (inf.distributor_id = $${params.length} OR d.distributor_id = $${params.length})`;
         countSql += clause;
         dataSql += clause;
-      } else if (currentUser.role === ROLES.DEALER) {
+      } else if (currentUser.role === ROLES.DEALER || currentUser.role === ROLES.RETAILER) {
         params.push(currentUser.dealerId);
         const clause = ` AND inf.dealer_id = $${params.length}`;
         countSql += clause;
@@ -270,7 +294,7 @@ export class UsersService {
     if (currentUser.role === ROLES.PLATFORM_OWNER_DISTRIBUTOR || currentUser.role === ROLES.DISTRIBUTOR) {
       tableName = 'distributors';
       idCol = 'distributor_id';
-    } else if (currentUser.role === ROLES.DEALER) {
+    } else if (currentUser.role === ROLES.DEALER || currentUser.role === ROLES.RETAILER) {
       tableName = 'dealers';
       idCol = 'dealer_id';
     } else if (currentUser.role === ROLES.CUSTOMER) {
@@ -382,7 +406,7 @@ export class UsersService {
       const cust = custRes.rows[0];
 
       // Scoping: Dealer can only delete customers under them; Platform Owner / Distributor can delete
-      if (!currentUser.isPlatformOwner && currentUser.role === ROLES.DEALER) {
+      if (!currentUser.isPlatformOwner && (currentUser.role === ROLES.DEALER || currentUser.role === ROLES.RETAILER)) {
         if (currentUser.dealerId !== cust.onboarding_dealer_id) {
           throw APIError.forbidden('Permission denied. You can only delete customers assigned to your store.');
         }

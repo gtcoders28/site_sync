@@ -58,7 +58,17 @@ export class CatalogService {
       throw APIError.forbidden('Only the Platform Owner can create products in the global catalog.');
     }
 
-    const { categoryId, brandId, variantName, unit, unitPrice, attributes = {} } = data;
+    const {
+      categoryId,
+      brandId,
+      variantName,
+      unit,
+      unitPrice,
+      hsnSacCode = '6802',
+      gstRate = 18.0,
+      distributorId = null,
+      attributes = {},
+    } = data;
 
     // Check category and brand existence
     const [catRes, brandRes] = await Promise.all([
@@ -71,19 +81,21 @@ export class CatalogService {
 
     const insertSql = `
       INSERT INTO products (
-        distributor_id, category_id, brand_id, variant_name, unit, attributes, unit_price, status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')
-      RETURNING product_id, distributor_id, category_id, brand_id, variant_name, unit, attributes, unit_price, status, created_at;
+        distributor_id, category_id, brand_id, variant_name, unit, attributes, unit_price, hsn_sac_code, gst_rate, status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'active')
+      RETURNING product_id, distributor_id, category_id, brand_id, variant_name, unit, attributes, unit_price, hsn_sac_code, gst_rate, status, created_at;
     `;
 
     const res = await query(insertSql, [
-      currentUser.id, // platform owner
+      distributorId, // NULL for Platform Master Catalog, or specific distributor UUID
       categoryId,
       brandId,
       variantName,
       unit,
       JSON.stringify(attributes),
       unitPrice,
+      hsnSacCode,
+      gstRate,
     ]);
 
     return res.rows[0];
@@ -152,8 +164,8 @@ export class CatalogService {
 
     let countSql = 'SELECT COUNT(*) FROM products p WHERE 1=1';
     let dataSql = `
-      SELECT p.product_id, p.category_id, p.brand_id, p.variant_name, p.unit,
-             p.attributes, p.unit_price, p.status, p.created_at, p.updated_at,
+      SELECT p.product_id, p.distributor_id, p.category_id, p.brand_id, p.variant_name, p.unit,
+             p.attributes, p.unit_price, p.hsn_sac_code, p.gst_rate, p.status, p.created_at, p.updated_at,
              c.category_name, c.default_unit, b.brand_name
       FROM products p
       JOIN product_categories c ON p.category_id = c.category_id
@@ -169,6 +181,13 @@ export class CatalogService {
     } else {
       countSql += " AND p.status = 'active'";
       dataSql += " AND p.status = 'active'";
+    }
+
+    if (queryParams.distributorId) {
+      params.push(queryParams.distributorId);
+      const clause = ` AND (p.distributor_id IS NULL OR p.distributor_id = $${params.length})`;
+      countSql += clause;
+      dataSql += clause;
     }
 
     if (queryParams.categoryId) {
@@ -212,8 +231,8 @@ export class CatalogService {
    */
   async getProductById(productId: string) {
     const res = await query(
-      `SELECT p.product_id, p.category_id, p.brand_id, p.variant_name, p.unit,
-              p.attributes, p.unit_price, p.status, p.created_at, p.updated_at,
+      `SELECT p.product_id, p.distributor_id, p.category_id, p.brand_id, p.variant_name, p.unit,
+              p.attributes, p.unit_price, p.hsn_sac_code, p.gst_rate, p.status, p.created_at, p.updated_at,
               c.category_name, b.brand_name
        FROM products p
        JOIN product_categories c ON p.category_id = c.category_id

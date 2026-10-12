@@ -57,6 +57,7 @@ app.get('/health', (req: Request, res: Response) => {
 
 // Mount Central API Routes
 app.use('/api/v1', routes);
+app.use('/api', routes);
 
 // 404 Catch-all for undefined routes
 app.use((req: Request, res: Response, next: NextFunction) => {

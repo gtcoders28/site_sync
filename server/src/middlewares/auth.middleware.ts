@@ -13,6 +13,12 @@ export interface UserContext {
   isPlatformOwner: boolean;
   distributorId?: string | null;
   dealerId?: string | null;
+  employerType?: 'distributor' | 'dealer' | null;
+  employerId?: string | null;
+  permissions?: {
+    canCreateInvoices: boolean;
+    canApproveRegistrations: boolean;
+  };
   status: string;
   profile: any;
 }
@@ -73,7 +79,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
         isPlatformOwner = userRow.is_platform_owner === true;
         actualRole = isPlatformOwner ? ROLES.PLATFORM_OWNER_DISTRIBUTOR : ROLES.DISTRIBUTOR;
       }
-    } else if (role === ROLES.DEALER) {
+    } else if (role === ROLES.DEALER || role === ROLES.RETAILER) {
       const dbRes = await query(
         `SELECT dealer_id AS id, distributor_id, parent_dealer_id, mobile_number, 
                 shop_name, owner_name, dealer_type, invite_code, status 
@@ -81,6 +87,9 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
         [userId]
       );
       userRow = dbRes.rows[0];
+      if (userRow) {
+        actualRole = userRow.dealer_type === 'retailer' ? ROLES.RETAILER : ROLES.DEALER;
+      }
     } else if (role === ROLES.CUSTOMER) {
       const dbRes = await query(
         `SELECT customer_id AS id, mobile_number, name, email, referral_code, 
@@ -97,6 +106,17 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
         [userId]
       );
       userRow = dbRes.rows[0];
+    } else if (role === ROLES.STAFF || role === 'staff') {
+      const dbRes = await query(
+        `SELECT staff_id AS id, employer_type, distributor_id, dealer_id, full_name, mobile_number, email, 
+                role, can_create_invoices, can_approve_registrations, status 
+         FROM staff WHERE staff_id = $1`,
+        [userId]
+      );
+      userRow = dbRes.rows[0];
+      if (userRow) {
+        actualRole = ROLES.STAFF;
+      }
     }
 
     if (!userRow) {
@@ -122,7 +142,13 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
       role: actualRole,
       isPlatformOwner,
       distributorId: userRow.distributor_id || (actualRole === ROLES.DISTRIBUTOR || isPlatformOwner ? userRow.id : null),
-      dealerId: userRow.dealer_id || (actualRole === ROLES.DEALER ? userRow.id : null),
+      dealerId: userRow.dealer_id || ((actualRole === ROLES.DEALER || actualRole === ROLES.RETAILER) ? userRow.id : null),
+      employerType: userRow.employer_type || null,
+      employerId: userRow.employer_type === 'distributor' ? userRow.distributor_id : (userRow.dealer_id || null),
+      permissions: actualRole === ROLES.STAFF ? {
+        canCreateInvoices: userRow.can_create_invoices === true,
+        canApproveRegistrations: userRow.can_approve_registrations === true,
+      } : undefined,
       status: userRow.status,
       profile: userRow,
     };

@@ -9,12 +9,19 @@ import { resolveRequestSchema, listRequestsQuerySchema } from './approvals.valid
 const router = Router();
 
 router.use(authenticate);
-router.use(authorizeRoles(ROLES.PLATFORM_OWNER_DISTRIBUTOR, ROLES.DISTRIBUTOR, ROLES.DEALER));
+router.use(authorizeRoles(ROLES.PLATFORM_OWNER_DISTRIBUTOR, ROLES.DISTRIBUTOR, ROLES.DEALER, ROLES.RETAILER, ROLES.STAFF));
 
-// List registration requests under this parent
+// List registration requests under this parent / staff's employer
 router.get('/', validate(listRequestsQuerySchema, 'query'), approvalsController.getRequests);
+router.get('/registration-requests', validate(listRequestsQuerySchema, 'query'), approvalsController.getRequests);
 
-// Resolve registration request
+// Specific approve / reject endpoints
+router.post('/registration-requests/:requestId/approve', approvalsController.approveRequest);
+router.post('/registration-requests/:requestId/reject', approvalsController.rejectRequest);
+
+// Generic resolve registration request (approve or reject)
 router.post('/:requestId/resolve', validate(resolveRequestSchema), approvalsController.resolveRequest);
+router.post('/:requestId/approve', approvalsController.approveRequest);
+router.post('/:requestId/reject', approvalsController.rejectRequest);
 
 export default router;

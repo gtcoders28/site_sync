@@ -50,7 +50,30 @@ export const requirePlatformOwner = (req: Request, res: Response, next: NextFunc
   next();
 };
 
+/**
+ * Middleware requiring specific staff operational permission if caller is staff
+ */
+export const requireStaffPermission = (permissionKey: 'canCreateInvoices' | 'canApproveRegistrations') => {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (!req.user) {
+      return next(APIError.unauthorized('Authentication required'));
+    }
+    if (req.user.role === ROLES.STAFF) {
+      if (!req.user.permissions || !req.user.permissions[permissionKey]) {
+        return next(
+          APIError.forbidden(
+            `Staff member is not authorized for '${permissionKey}'.`,
+            'INSUFFICIENT_STAFF_PERMISSIONS'
+          )
+        );
+      }
+    }
+    next();
+  };
+};
+
 export default {
   authorizeRoles,
   requirePlatformOwner,
+  requireStaffPermission,
 };

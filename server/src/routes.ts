@@ -9,6 +9,7 @@ import invoicesRoutes from './modules/invoices/invoices.routes';
 import inventoryRoutes from './modules/inventory/inventory.routes';
 import loyaltyRoutes from './modules/loyalty/loyalty.routes';
 import analyticsRoutes from './modules/analytics/analytics.routes';
+import staffRoutes from './modules/staff/staff.routes';
 
 const router = Router();
 
@@ -26,5 +27,6 @@ router.use('/invoices', invoicesRoutes);
 router.use('/inventory', inventoryRoutes);
 router.use('/loyalty', loyaltyRoutes);
 router.use('/analytics', analyticsRoutes);
+router.use('/staff', staffRoutes);
 
 export default router;

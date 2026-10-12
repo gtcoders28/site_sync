@@ -12,8 +12,10 @@ export class AuthController {
     this.signIn = this.signIn.bind(this);
     this.signInDistributor = this.signInDistributor.bind(this);
     this.signInDealer = this.signInDealer.bind(this);
+    this.signInRetailer = this.signInRetailer.bind(this);
     this.signInCustomer = this.signInCustomer.bind(this);
     this.signInInfluencer = this.signInInfluencer.bind(this);
+    this.signInStaff = this.signInStaff.bind(this);
     this.refreshToken = this.refreshToken.bind(this);
     this.logout = this.logout.bind(this);
     this.getMe = this.getMe.bind(this);
@@ -89,6 +91,11 @@ export class AuthController {
     return this.signIn(req, res, next);
   }
 
+  async signInRetailer(req: Request, res: Response, next: NextFunction): Promise<void> {
+    req.body.role = 'retailer';
+    return this.signIn(req, res, next);
+  }
+
   async signInCustomer(req: Request, res: Response, next: NextFunction): Promise<void> {
     req.body.role = 'customer';
     return this.signIn(req, res, next);
@@ -96,6 +103,11 @@ export class AuthController {
 
   async signInInfluencer(req: Request, res: Response, next: NextFunction): Promise<void> {
     req.body.role = 'influencer';
+    return this.signIn(req, res, next);
+  }
+
+  async signInStaff(req: Request, res: Response, next: NextFunction): Promise<void> {
+    req.body.role = 'staff';
     return this.signIn(req, res, next);
   }
 

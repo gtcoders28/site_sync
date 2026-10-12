@@ -41,7 +41,7 @@ export class LoyaltyService {
 
     // Scoping
     if (!currentUser.isPlatformOwner) {
-      if (currentUser.role === ROLES.DEALER) {
+      if (currentUser.role === ROLES.DEALER || currentUser.role === ROLES.RETAILER) {
         params.push('dealer');
         params.push(currentUser.dealerId);
         const clause = ` AND l.profile_type = $${params.length - 1} AND l.profile_id = $${params.length}`;
@@ -92,7 +92,7 @@ export class LoyaltyService {
     let profileType: string;
     let profileId: string;
 
-    if (currentUser.role === ROLES.DEALER) {
+    if (currentUser.role === ROLES.DEALER || currentUser.role === ROLES.RETAILER) {
       profileType = 'dealer';
       profileId = currentUser.dealerId || currentUser.id;
     } else if (currentUser.role === ROLES.CUSTOMER) {
@@ -149,7 +149,7 @@ export class LoyaltyService {
 
     // Scoping: Platform owner sees all. Others only see their own requests.
     if (!currentUser.isPlatformOwner) {
-      let pType = currentUser.role === ROLES.DEALER ? 'dealer' : currentUser.role;
+      let pType = (currentUser.role === ROLES.DEALER || currentUser.role === ROLES.RETAILER) ? 'dealer' : currentUser.role;
       params.push(pType);
       params.push(currentUser.entityId || currentUser.id);
       const clause = ` AND r.profile_type = $${params.length - 1} AND r.profile_id = $${params.length}`;

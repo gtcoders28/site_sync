@@ -25,7 +25,7 @@ router.get(
 // Dealer inventory
 router.get(
   '/dealer',
-  authorizeRoles(ROLES.PLATFORM_OWNER_DISTRIBUTOR, ROLES.DISTRIBUTOR, ROLES.DEALER),
+  authorizeRoles(ROLES.PLATFORM_OWNER_DISTRIBUTOR, ROLES.DISTRIBUTOR, ROLES.DEALER, ROLES.RETAILER),
   validate(listInventoryQuerySchema, 'query'),
   inventoryController.getDealerInventory
 );
@@ -33,7 +33,7 @@ router.get(
 // Inventory movements audit trail
 router.get(
   '/movements',
-  authorizeRoles(ROLES.PLATFORM_OWNER_DISTRIBUTOR, ROLES.DISTRIBUTOR, ROLES.DEALER),
+  authorizeRoles(ROLES.PLATFORM_OWNER_DISTRIBUTOR, ROLES.DISTRIBUTOR, ROLES.DEALER, ROLES.RETAILER),
   validate(listMovementsQuerySchema, 'query'),
   inventoryController.getMovements
 );
@@ -41,7 +41,7 @@ router.get(
 // Manual stock adjustment
 router.post(
   '/adjust',
-  authorizeRoles(ROLES.PLATFORM_OWNER_DISTRIBUTOR, ROLES.DISTRIBUTOR, ROLES.DEALER),
+  authorizeRoles(ROLES.PLATFORM_OWNER_DISTRIBUTOR, ROLES.DISTRIBUTOR, ROLES.DEALER, ROLES.RETAILER),
   validate(manualAdjustmentSchema),
   inventoryController.manualAdjustment
 );
