@@ -16,6 +16,11 @@ const app = express();
 // Security Headers
 app.use(helmet());
 
+const allowedOrigins = [
+  "https://site-sync-rosy.vercel.app",
+  "https://site-sync-proto.vercel.app",
+  "http://localhost:5173",
+];
 // CORS configuration
 app.use(
   cors({

@@ -4,6 +4,7 @@ import {
   Building2,
   Phone,
   LogIn,
+  ArrowLeft,
   ArrowRight,
   UserCircle2,
   Megaphone,
@@ -13,7 +14,7 @@ import {
   RefreshCw,
   UserCheck,
 } from 'lucide-react';
-import { ApiError } from '../../lib/api/client';
+import { apiClient, ApiError } from '../../lib/api/client';
 import { authApi, type AuthResult, type PublicRole, type AuthenticatedUser } from '../../lib/api/auth';
 import { useAuth } from '../../context/AuthContext';
 import { CustomDropdown } from '../ui/CustomDropdown';
@@ -37,6 +38,7 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
   const [isLogin, setIsLogin] = useState(true);
   const [role, setRole] = useState<'distributor' | 'dealer' | 'retailer' | 'staff' | 'customer' | 'influencer'>('distributor');
   const [step, setStep] = useState(1);
+  const [maxStep, setMaxStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
@@ -74,30 +76,52 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
   const [dealerList, setDealerList] = useState<Array<{ rawId: string; name: string }>>([]);
 
   useEffect(() => {
-    fetch('/api/v1/auth/public-distributors')
-      .then((r) => r.json())
-      .then((j) => {
-        if (j.success && Array.isArray(j.data)) {
-          const list = j.data.map((d: any) => ({ rawId: d.distributor_id, name: d.company_name || d.owner_name }));
-          setDistributorList(list);
-          if (list.length > 0 && !distributorId) setDistributorId(list[0].rawId);
-        }
-      })
-      .catch(() => {});
+    let isMounted = true;
 
-    fetch('/api/v1/auth/public-dealers')
-      .then((r) => r.json())
-      .then((j) => {
-        if (j.success && Array.isArray(j.data)) {
-          const list = j.data.map((d: any) => ({ rawId: d.dealer_id, name: d.shop_name || d.owner_name }));
-          setDealerList(list);
-          if (list.length > 0 && !dealerId) {
-            setDealerId(list[0].rawId);
-            setOnboardingDealerId(list[0].rawId);
+    apiClient
+      .get<Array<{ distributor_id: string; company_name?: string; owner_name?: string }>>(
+        '/auth/public-distributors',
+        { skipRefresh: true }
+      )
+      .then((res) => {
+        if (!isMounted) return;
+        if (res.success && Array.isArray(res.data)) {
+          const list = res.data.map((d) => ({
+            rawId: d.distributor_id,
+            name: d.company_name || d.owner_name || '',
+          }));
+          setDistributorList(list);
+          if (list.length > 0) {
+            setDistributorId((prev) => prev || list[0].rawId);
           }
         }
       })
       .catch(() => {});
+
+    apiClient
+      .get<Array<{ dealer_id: string; shop_name?: string; owner_name?: string }>>(
+        '/auth/public-dealers',
+        { skipRefresh: true }
+      )
+      .then((res) => {
+        if (!isMounted) return;
+        if (res.success && Array.isArray(res.data)) {
+          const list = res.data.map((d) => ({
+            rawId: d.dealer_id,
+            name: d.shop_name || d.owner_name || '',
+          }));
+          setDealerList(list);
+          if (list.length > 0) {
+            setDealerId((prev) => prev || list[0].rawId);
+            setOnboardingDealerId((prev) => prev || list[0].rawId);
+          }
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -105,6 +129,61 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
       setRole('dealer');
     }
   }, [isLogin, role]);
+
+  const validateRegistrationStep = (targetStep: number): boolean => {
+    const cleanMobile = mobileNumber.replace(/\D/g, '').slice(-10);
+    if (targetStep === 1) {
+      if (!cleanMobile || cleanMobile.length !== 10) {
+        setErrorMessage('Please enter a valid 10-digit mobile number.');
+        return false;
+      }
+      if (!password || password.length < 6) {
+        setErrorMessage('Password must be at least 6 characters.');
+        return false;
+      }
+    } else if (targetStep === 2) {
+      if (role === 'dealer' || role === 'retailer') {
+        if (!shopName.trim()) {
+          setErrorMessage('Please enter your Firm / Shop Name.');
+          return false;
+        }
+        if (!ownerName.trim()) {
+          setErrorMessage('Please enter the Owner Name.');
+          return false;
+        }
+      } else if (role === 'customer' || role === 'influencer') {
+        if (!name.trim()) {
+          setErrorMessage('Please enter your full name.');
+          return false;
+        }
+      }
+    }
+    return true;
+  };
+
+  const handlePrevious = () => {
+    if (isLoading || step <= 1) return;
+    setErrorMessage('');
+    setStep((prev) => Math.max(1, prev - 1));
+  };
+
+  const handleStepSelect = (targetStep: number) => {
+    if (isLoading || targetStep === step || targetStep < 1 || targetStep > 3) return;
+    setErrorMessage('');
+    if (targetStep < step) {
+      setStep(targetStep);
+      return;
+    }
+    if (targetStep <= maxStep) {
+      for (let s = step; s < targetStep; s += 1) {
+        if (!validateRegistrationStep(s)) {
+          setStep(s);
+          return;
+        }
+      }
+      setStep(targetStep);
+    }
+  };
 
   const handleNext = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -139,7 +218,10 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
     }
 
     if (step < 3) {
-      setStep(step + 1);
+      if (!validateRegistrationStep(step)) return;
+      const nextStep = step + 1;
+      setStep(nextStep);
+      setMaxStep((prev) => Math.max(prev, nextStep));
       return;
     }
 
@@ -262,6 +344,7 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
                   setSuccessMessage('');
                   setIsLogin(true);
                   setStep(1);
+                  setMaxStep(1);
                 }}
                 className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 px-6 rounded-xl transition-all shadow-xs"
               >
@@ -279,6 +362,52 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
                     ? 'Enter your mobile credentials to access your portal'
                     : `Setup your ${role} profile (Step ${step}/3)`}
                 </p>
+
+                {!isLogin && (
+                  <div className="mt-4 flex items-center justify-center gap-2" aria-label="Registration steps">
+                    {[
+                      { num: 1, label: 'Account' },
+                      { num: 2, label: 'Details' },
+                      { num: 3, label: 'Location' },
+                    ].map((s, idx) => {
+                      const isCurrent = step === s.num;
+                      const isCompleted = s.num < step;
+                      const isClickable = s.num < step || (s.num <= maxStep && s.num !== step);
+                      return (
+                        <React.Fragment key={s.num}>
+                          <button
+                            type="button"
+                            disabled={!isClickable && !isCurrent}
+                            onClick={() => isClickable && handleStepSelect(s.num)}
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold transition-all border ${
+                              isCurrent
+                                ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                                : isCompleted
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 cursor-pointer'
+                                : s.num <= maxStep
+                                ? 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50 cursor-pointer'
+                                : 'bg-slate-100 text-slate-400 border-transparent cursor-default'
+                            }`}
+                          >
+                            <span
+                              className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-black ${
+                                isCurrent
+                                  ? 'bg-white/20 text-white'
+                                  : isCompleted
+                                  ? 'bg-emerald-600 text-white'
+                                  : 'bg-slate-200 text-slate-500'
+                              }`}
+                            >
+                              {isCompleted ? <Check size={10} /> : s.num}
+                            </span>
+                            <span>{s.label}</span>
+                          </button>
+                          {idx < 2 && <div className={`h-px w-4 ${s.num < step ? 'bg-emerald-300' : 'bg-slate-200'}`} />}
+                        </React.Fragment>
+                      );
+                    })}
+                  </div>
+                )}
 
                 {errorMessage && (
                   <div
@@ -314,7 +443,14 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
                       <button
                         key={r.id}
                         type="button"
-                        onClick={() => setRole(r.id as any)}
+                        onClick={() => {
+                          setRole(r.id as any);
+                          setMaxStep(1);
+                          setErrorMessage('');
+                          if (r.id === 'dealer' || r.id === 'retailer') {
+                            setDealerType(r.id);
+                          }
+                        }}
                         className={`relative py-2 px-1 text-xs font-bold rounded-xl flex flex-col items-center justify-center gap-1 transition-colors duration-150 cursor-pointer outline-none focus:outline-none select-none border border-transparent ${
                           isActive ? r.activeColor : 'text-slate-500 hover:text-slate-800'
                         }`}
@@ -604,20 +740,33 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
                   </div>
                 )}
 
-                <button
-                  type="submit"
-                  disabled={isLoading}
-                  className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all shadow-xs hover:shadow active:scale-[0.98] disabled:opacity-70"
-                >
-                  {isLoading ? (
-                    <RefreshCw size={18} className="animate-spin" />
-                  ) : (
-                    <>
-                      <span>{isLogin ? 'Sign In Securely' : step < 3 ? 'Continue' : 'Complete Setup'}</span>
-                      <ArrowRight size={16} />
-                    </>
+                <div className={!isLogin && step > 1 ? 'grid grid-cols-2 gap-3 pt-1' : 'pt-1'}>
+                  {!isLogin && step > 1 && (
+                    <button
+                      type="button"
+                      onClick={handlePrevious}
+                      disabled={isLoading}
+                      className="w-full bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-60 cursor-pointer"
+                    >
+                      <ArrowLeft size={16} />
+                      <span>Previous</span>
+                    </button>
                   )}
-                </button>
+                  <button
+                    type="submit"
+                    disabled={isLoading}
+                    className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all shadow-xs hover:shadow active:scale-[0.98] disabled:opacity-70 cursor-pointer"
+                  >
+                    {isLoading ? (
+                      <RefreshCw size={18} className="animate-spin" />
+                    ) : (
+                      <>
+                        <span>{isLogin ? 'Sign In Securely' : step < 3 ? 'Next' : 'Complete Setup'}</span>
+                        <ArrowRight size={16} />
+                      </>
+                    )}
+                  </button>
+                </div>
               </form>
 
               <div className="text-center pt-2">
@@ -627,9 +776,13 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
                     const nextIsLogin = !isLogin;
                     setIsLogin(nextIsLogin);
                     setStep(1);
+                    setMaxStep(1);
                     setErrorMessage('');
                     if (!nextIsLogin && role === 'distributor') {
                       setRole('dealer');
+                      setDealerType('dealer');
+                    } else if (!nextIsLogin && role === 'retailer') {
+                      setDealerType('retailer');
                     }
                   }}
                   className="text-xs text-slate-500 hover:text-slate-900 font-semibold"
