@@ -19,7 +19,6 @@ import { authApi, type AuthResult, type PublicRole, type AuthenticatedUser } fro
 import { useAuth } from '../../context/AuthContext';
 import { CustomDropdown } from '../ui/CustomDropdown';
 import { SearchableSelect, INDIAN_STATES_AND_UTS } from '../ui/SearchableSelect';
-import { motion } from 'motion/react';
 
 interface AuthFlowProps {
   onAuthenticated: (result: AuthResult) => void;
@@ -54,9 +53,8 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
   const [gstNumber, setGstNumber] = useState('');
 
   // Dealer / Retailer Specific
-  const [distributorId, setDistributorId] = useState('');
+  const [parentDealerId, setParentDealerId] = useState('');
   const [shopName, setShopName] = useState('');
-  const [dealerType, setDealerType] = useState<'dealer' | 'retailer'>('dealer');
 
   // Customer Specific
   const [onboardingDealerId, setOnboardingDealerId] = useState('');
@@ -72,34 +70,20 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
   const [pincode, setPincode] = useState('');
 
   // Live options loaded from database
-  const [distributorList, setDistributorList] = useState<Array<{ rawId: string; name: string }>>([]);
-  const [dealerList, setDealerList] = useState<Array<{ rawId: string; name: string }>>([]);
+  const [dealerList, setDealerList] = useState<Array<{ rawId: string; name: string; dealerType?: string; distributorId?: string | null; city?: string }>>([]);
+  const [dealersLoading, setDealersLoading] = useState(true);
+  const [dealersError, setDealersError] = useState('');
+
+  const wholesaleDealerList = dealerList.filter((d) => d.dealerType === 'dealer');
+  const isRetailerSignup = role === 'retailer';
 
   useEffect(() => {
     let isMounted = true;
+    setDealersLoading(true);
+    setDealersError('');
 
     apiClient
-      .get<Array<{ distributor_id: string; company_name?: string; owner_name?: string }>>(
-        '/auth/public-distributors',
-        { skipRefresh: true }
-      )
-      .then((res) => {
-        if (!isMounted) return;
-        if (res.success && Array.isArray(res.data)) {
-          const list = res.data.map((d) => ({
-            rawId: d.distributor_id,
-            name: d.company_name || d.owner_name || '',
-          }));
-          setDistributorList(list);
-          if (list.length > 0) {
-            setDistributorId((prev) => prev || list[0].rawId);
-          }
-        }
-      })
-      .catch(() => {});
-
-    apiClient
-      .get<Array<{ dealer_id: string; shop_name?: string; owner_name?: string }>>(
+      .get<Array<{ dealer_id: string; distributor_id?: string | null; shop_name?: string; owner_name?: string; dealer_type?: string; city?: string }>>(
         '/auth/public-dealers',
         { skipRefresh: true }
       )
@@ -109,15 +93,26 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
           const list = res.data.map((d) => ({
             rawId: d.dealer_id,
             name: d.shop_name || d.owner_name || '',
+            dealerType: d.dealer_type,
+            distributorId: d.distributor_id,
+            city: d.city,
           }));
           setDealerList(list);
           if (list.length > 0) {
             setDealerId((prev) => prev || list[0].rawId);
             setOnboardingDealerId((prev) => prev || list[0].rawId);
           }
+        } else {
+          setDealersError('Unable to load active dealers.');
         }
       })
-      .catch(() => {});
+      .catch((err: any) => {
+        if (!isMounted) return;
+        setDealersError(err?.message || 'Unable to load active dealers.');
+      })
+      .finally(() => {
+        if (isMounted) setDealersLoading(false);
+      });
 
     return () => {
       isMounted = false;
@@ -125,8 +120,9 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
   }, []);
 
   useEffect(() => {
-    if (!isLogin && role === 'distributor') {
+    if (!isLogin && (role === 'distributor' || role === 'staff')) {
       setRole('dealer');
+      setParentDealerId('');
     }
   }, [isLogin, role]);
 
@@ -143,6 +139,10 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
       }
     } else if (targetStep === 2) {
       if (role === 'dealer' || role === 'retailer') {
+        if (isRetailerSignup && parentDealerId && !wholesaleDealerList.some((d) => d.rawId === parentDealerId)) {
+          setErrorMessage('Please select a valid wholesale dealer or choose None.');
+          return false;
+        }
         if (!shopName.trim()) {
           setErrorMessage('Please enter your Firm / Shop Name.');
           return false;
@@ -151,9 +151,18 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
           setErrorMessage('Please enter the Owner Name.');
           return false;
         }
-      } else if (role === 'customer' || role === 'influencer') {
+      } else if (role === 'customer') {
         if (!name.trim()) {
           setErrorMessage('Please enter your full name.');
+          return false;
+        }
+      } else if (role === 'influencer') {
+        if (!name.trim()) {
+          setErrorMessage('Please enter your full name.');
+          return false;
+        }
+        if (!dealerId || !dealerList.some((d) => d.rawId === dealerId)) {
+          setErrorMessage(dealersError || 'Please select an active associated dealer.');
           return false;
         }
       }
@@ -235,20 +244,22 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
     setIsLoading(true);
     try {
       let payload: Record<string, unknown> = {};
+      let signupRole: Exclude<PublicRole, 'distributor' | 'staff'> = role as Exclude<PublicRole, 'distributor' | 'staff'>;
+
       if (role === 'dealer' || role === 'retailer') {
-        const resolvedDistId = distributorId || distributorList[0]?.rawId || '13ec6018-ecde-4dea-86a3-4c5ed3fc29bd';
+        const selectedParentDealerId = isRetailerSignup && parentDealerId ? parentDealerId : undefined;
+        signupRole = isRetailerSignup ? 'retailer' : 'dealer';
         payload = {
-          distributorId: resolvedDistId,
+          ...(selectedParentDealerId ? { parentDealerId: selectedParentDealerId } : {}),
           mobileNumber: cleanMobile,
           password,
-          shopName: shopName.trim() || name.trim() || 'Metro Materials Firm',
-          ownerName: ownerName.trim() || name.trim() || 'Authorized Partner',
-          dealerType: (role === 'retailer' || dealerType === 'retailer') ? 'retailer' : 'dealer',
+          shopName: shopName.trim(),
+          ownerName: ownerName.trim(),
+          dealerType: isRetailerSignup ? 'retailer' : 'dealer',
           gstNumber: gstNumber.trim() || undefined,
           city: city.trim() || 'Delhi',
           state: stateName.trim() || 'Delhi',
           pincode: pincode.trim() || '110001',
-          source: 'self_registered',
         };
       } else if (role === 'customer') {
         payload = {
@@ -256,7 +267,7 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
           referralCode: referralCode.trim() || undefined,
           mobileNumber: cleanMobile,
           password,
-          name: name.trim() || 'Valued Customer',
+          name: name.trim(),
           email: email.trim() || undefined,
           city: city.trim() || 'Delhi',
           state: stateName.trim() || 'Delhi',
@@ -264,19 +275,23 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
           createdByType: 'self',
         };
       } else if (role === 'influencer') {
-        const resolvedDlrId = dealerId || dealerList[0]?.rawId || '49f7be36-005e-42ff-b260-9ac41a072c88';
+        if (!dealerId) {
+          setErrorMessage(dealersError || 'Please select a valid associated dealer.');
+          setStep(2);
+          setIsLoading(false);
+          return;
+        }
         payload = {
-          dealerId: resolvedDlrId,
+          dealerId,
           mobileNumber: cleanMobile,
           password,
-          name: name.trim() || 'Contractor Partner',
+          name: name.trim(),
           city: city.trim() || 'Delhi',
           state: stateName.trim() || 'Delhi',
-          source: 'self_registered',
         };
       }
 
-      const result = await authApi.signUp(role as Exclude<PublicRole, 'distributor' | 'staff'>, payload);
+      const result = await authApi.signUp(signupRole, payload);
       setSuccessMessage(result.message || 'Registration completed successfully!');
       if (result.data?.tokens?.accessToken) {
         onAuthenticated(result);
@@ -433,8 +448,8 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
               {step === 1 && (
                 <div
                   className={`grid ${
-                    isLogin ? 'grid-cols-5' : 'grid-cols-4'
-                  } gap-1 bg-slate-100/90 p-1.5 rounded-2xl border border-slate-200/70`}
+                    isLogin ? 'grid-cols-3' : 'grid-cols-2 sm:grid-cols-4'
+                  } gap-1.5 bg-slate-100/90 p-1.5 rounded-2xl border border-slate-200/70`}
                 >
                   {AUTH_ROLES.filter((r) => !r.loginOnly || isLogin).map((r) => {
                     const Icon = r.icon;
@@ -447,23 +462,18 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
                           setRole(r.id as any);
                           setMaxStep(1);
                           setErrorMessage('');
-                          if (r.id === 'dealer' || r.id === 'retailer') {
-                            setDealerType(r.id);
+                          if (r.id === 'dealer') {
+                            setParentDealerId('');
                           }
                         }}
-                        className={`relative py-2 px-1 text-xs font-bold rounded-xl flex flex-col items-center justify-center gap-1 transition-colors duration-150 cursor-pointer outline-none focus:outline-none select-none border border-transparent ${
-                          isActive ? r.activeColor : 'text-slate-500 hover:text-slate-800'
+                        className={`relative py-2.5 px-2 text-xs font-bold rounded-xl flex flex-col items-center justify-center gap-1 transition-all duration-150 cursor-pointer outline-none focus:outline-none select-none border ${
+                          isActive
+                            ? `bg-white shadow-xs border-slate-200/90 ${r.activeColor}`
+                            : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-white/50'
                         }`}
                       >
-                        {isActive && (
-                          <motion.div
-                            layoutId="activeRoleIndicator"
-                            className="absolute inset-0 bg-white rounded-xl shadow-xs border border-slate-200/90"
-                            transition={{ type: 'spring', stiffness: 500, damping: 35 }}
-                          />
-                        )}
-                        <Icon size={16} className="relative z-10 shrink-0" />
-                        <span className="relative z-10 truncate text-[11px] font-bold">{r.label}</span>
+                        <Icon size={16} className="shrink-0" />
+                        <span className="truncate text-[11px] font-bold">{r.label}</span>
                       </button>
                     );
                   })}
@@ -515,23 +525,32 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
                   <div className="space-y-3.5">
                     {(role === 'dealer' || role === 'retailer') && (
                       <>
-                        <div>
-                          <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                            Assigned Regional Distributor *
-                          </label>
-                          <CustomDropdown
-                            value={distributorId}
-                            onChange={setDistributorId}
-                            options={
-                              distributorList.length === 0
-                                ? [{ value: '13ec6018-ecde-4dea-86a3-4c5ed3fc29bd', label: 'North Zone Logistics Ltd (Verified Hub)' }]
-                                : distributorList.map((d) => ({ value: d.rawId, label: d.name }))
-                            }
-                            className="w-full"
-                            buttonClassName="w-full py-2.5"
-                            menuClassName="w-full"
-                          />
-                        </div>
+                        {isRetailerSignup && (
+                          <div>
+                            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                              Parent Dealer (Optional)
+                            </label>
+                            <CustomDropdown
+                              value={parentDealerId}
+                              onChange={setParentDealerId}
+                              disabled={dealersLoading}
+                              placeholder={dealersLoading ? 'Loading wholesale dealers...' : 'None (Assign under Platform Distributor)'}
+                              options={[
+                                { value: '', label: 'None (Assign under Platform Distributor)' },
+                                ...wholesaleDealerList.map((d) => ({
+                                  value: d.rawId,
+                                  label: d.city ? `${d.name} (${d.city})` : d.name,
+                                })),
+                              ]}
+                              className="w-full"
+                              buttonClassName="w-full py-2.5"
+                              menuClassName="w-full"
+                            />
+                            <p className="mt-1 text-[11px] text-slate-500">
+                              Select a parent wholesale dealer or leave as None to register directly under the platform distributor.
+                            </p>
+                          </div>
+                        )}
 
                         <div>
                           <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
@@ -547,36 +566,18 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
                           />
                         </div>
 
-                        <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                              Owner Name *
-                            </label>
-                            <input
-                              type="text"
-                              required
-                              value={ownerName}
-                              onChange={(e) => setOwnerName(e.target.value)}
-                              placeholder="e.g. Rakesh Aggarwal"
-                              className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                              Operation Type
-                            </label>
-                            <CustomDropdown
-                              value={dealerType}
-                              onChange={(val) => setDealerType(val as 'dealer' | 'retailer')}
-                              options={[
-                                { value: 'dealer', label: 'Dealer' },
-                                { value: 'retailer', label: 'Retailer' },
-                              ]}
-                              className="w-full"
-                              buttonClassName="w-full py-2.5"
-                              menuClassName="w-full"
-                            />
-                          </div>
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                            Owner Name *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={ownerName}
+                            onChange={(e) => setOwnerName(e.target.value)}
+                            placeholder="e.g. Rakesh Aggarwal"
+                            className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none"
+                          />
                         </div>
 
                         <div>
@@ -675,18 +676,28 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
                           <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                             Associated Dealer *
                           </label>
-                          <CustomDropdown
-                            value={dealerId}
-                            onChange={setDealerId}
-                            options={
-                              dealerList.length === 0
-                                ? [{ value: '49f7be36-005e-42ff-b260-9ac41a072c88', label: 'Metro Hardware 2563 (Verified Dealer)' }]
-                                : dealerList.map((d) => ({ value: d.rawId, label: d.name }))
-                            }
-                            className="w-full"
-                            buttonClassName="w-full py-2.5"
-                            menuClassName="w-full"
-                          />
+                          {dealersLoading ? (
+                            <div className="px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-500">
+                              Loading active dealers...
+                            </div>
+                          ) : dealerList.length === 0 ? (
+                            <div className="px-3.5 py-2.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800">
+                              {dealersError || 'No active dealers found right now. Please try again later.'}
+                            </div>
+                          ) : (
+                            <CustomDropdown
+                              value={dealerId}
+                              onChange={setDealerId}
+                              placeholder="Select associated dealer..."
+                              options={dealerList.map((d) => ({
+                                value: d.rawId,
+                                label: d.city ? `${d.name} (${d.city})` : d.name,
+                              }))}
+                              className="w-full"
+                              buttonClassName="w-full py-2.5"
+                              menuClassName="w-full"
+                            />
+                          )}
                         </div>
                       </>
                     )}
@@ -778,11 +789,11 @@ export default function AuthFlow({ onAuthenticated }: AuthFlowProps) {
                     setStep(1);
                     setMaxStep(1);
                     setErrorMessage('');
-                    if (!nextIsLogin && role === 'distributor') {
+                    if (!nextIsLogin && (role === 'distributor' || role === 'staff')) {
                       setRole('dealer');
-                      setDealerType('dealer');
-                    } else if (!nextIsLogin && role === 'retailer') {
-                      setDealerType('retailer');
+                      setParentDealerId('');
+                    } else if (!nextIsLogin && role === 'dealer') {
+                      setParentDealerId('');
                     }
                   }}
                   className="text-xs text-slate-500 hover:text-slate-900 font-semibold"
