@@ -17,20 +17,26 @@ const app = express();
 app.use(helmet());
 
 const allowedOrigins = [
-  "https://site-sync-rosy.vercel.app",
-  "https://site-sync-proto.vercel.app",
-  "http://localhost:5173",
+  'https://site-sync-rosy.vercel.app',
+  'https://site-sync-proto.vercel.app',
+  'http://localhost:5173',
+  'http://localhost:3000',
 ];
+
+const normalizedEnvOrigins = env.CORS_ORIGIN.map((o) => o.replace(/\/$/, ''));
+const combinedAllowedOrigins = new Set([...allowedOrigins, ...normalizedEnvOrigins]);
+
 // CORS configuration
 app.use(
   cors({
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-      // Allow requests with no origin (e.g. mobile apps, curl, Postman)
+      // Allow requests with no origin (e.g. mobile apps, curl, Postman, server-to-server)
       if (!origin) return callback(null, true);
-      if (env.CORS_ORIGIN.includes('*') || env.CORS_ORIGIN.includes(origin)) {
+      const normalizedOrigin = origin.replace(/\/$/, '');
+      if (normalizedEnvOrigins.includes('*') || combinedAllowedOrigins.has(normalizedOrigin)) {
         return callback(null, true);
       }
-      return callback(new Error('Blocked by CORS policy'));
+      return callback(APIError.forbidden('Blocked by CORS policy', 'CORS_NOT_ALLOWED'));
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],

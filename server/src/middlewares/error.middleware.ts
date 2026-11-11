@@ -13,33 +13,34 @@ export const errorHandler = (err: any, req: Request, res: Response, next: NextFu
 
   let error = err;
 
-  // 1. Handle PostgreSQL Specific Errors
+  // 1. Handle PostgreSQL Specific Errors (never leak internal SQL details or constraint names)
   if (err && err.code) {
+    if (env.NODE_ENV !== 'test') {
+      console.error('Database Error:', {
+        code: err.code,
+        constraint: err.constraint,
+        detail: err.detail,
+        message: err.message,
+      });
+    }
+
     // Unique violation (23505)
     if (err.code === '23505') {
-      const detail = err.detail || 'Duplicate key violation';
-      error = APIError.conflict(`Duplicate value error: ${detail}`, 'DUPLICATE_ENTRY', {
-        constraint: err.constraint,
-      });
+      error = APIError.conflict('A record with this unique value already exists.', 'DUPLICATE_ENTRY');
     }
     // Foreign key violation (23503)
     else if (err.code === '23503') {
       error = APIError.badRequest(
-        'Referenced record does not exist or is constrained.',
-        {
-          constraint: err.constraint,
-          detail: err.detail,
-        },
+        'Referenced record does not exist or cannot be modified.',
+        null,
         'FOREIGN_KEY_VIOLATION'
       );
     }
     // Check violation (23514)
     else if (err.code === '23514') {
       error = APIError.badRequest(
-        `Data violates database integrity rule (${err.constraint || 'check constraint'}).`,
-        {
-          constraint: err.constraint,
-        },
+        'Submitted data violates a system integrity rule.',
+        null,
         'CHECK_CONSTRAINT_VIOLATION'
       );
     }
@@ -68,14 +69,14 @@ export const errorHandler = (err: any, req: Request, res: Response, next: NextFu
 
   // 3. Fallback for unhandled unexpected errors
   if (!(error instanceof APIError)) {
-    const message = env.NODE_ENV === 'production' ? 'Internal server error' : err.message || 'An unexpected error occurred';
+    const message = env.NODE_ENV === 'production' ? 'Internal server error' : 'An unexpected error occurred';
     error = APIError.internal(message);
     if (env.NODE_ENV !== 'test') {
       console.error('Unhandled System Error:', err);
     }
   }
 
-  // Build standardized error response
+  // Build standardized error response (never expose stack traces in HTTP JSON)
   const statusCode = error.statusCode || 500;
   const response: Record<string, any> = {
     success: false,
@@ -89,7 +90,7 @@ export const errorHandler = (err: any, req: Request, res: Response, next: NextFu
   }
 
   if (env.NODE_ENV === 'development' && error.stack) {
-    response.stack = error.stack;
+    console.error('Error Stack:', error.stack);
   }
 
   res.status(statusCode).json(response);
