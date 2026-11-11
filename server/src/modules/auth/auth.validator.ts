@@ -29,29 +29,30 @@ export const createDistributorSchema = z.object({
   isPlatformOwner: z.boolean().optional(),
 });
 
-export const signUpDealerSchema = z
-  .object({
-    distributorId: z.string().uuid('Valid distributor ID is required').optional().nullable(),
-    parentDealerId: z.string().uuid('Invalid parent dealer ID').optional().nullable(),
-    mobileNumber: z.string().trim().regex(indianMobileRegex, 'Valid 10-digit mobile number required'),
-    password: z.string().min(6, 'Password must be at least 6 characters'),
-    shopName: z.string().trim().min(2, 'Shop name is required'),
-    ownerName: z.string().trim().min(2, 'Owner name is required'),
-    dealerType: z.enum([DEALER_TYPE.DEALER, DEALER_TYPE.RETAILER]),
-    aadharNumber: z.string().trim().regex(aadharRegex, 'Aadhar must be exactly 12 digits').optional().nullable(),
-    gstNumber: z.string().trim().optional().nullable(),
-    address: z.string().trim().optional().nullable(),
-    city: z.string().trim().optional().nullable(),
-    state: z.string().trim().optional().nullable(),
-    pincode: z.string().trim().optional().nullable(),
-    latitude: z.number().optional().nullable(),
-    longitude: z.number().optional().nullable(),
-    source: z.enum([DEALER_SOURCE.SELF_REGISTERED, DEALER_SOURCE.CREATED_BY_DISTRIBUTOR]).default(DEALER_SOURCE.SELF_REGISTERED),
-  })
-  .refine((data) => data.distributorId || data.parentDealerId, {
-    message: 'Either distributorId or parentDealerId must be provided',
-    path: ['distributorId'],
-  });
+export const signUpDealerSchema = z.object({
+  distributorId: z.string().uuid('Valid distributor ID is required').optional().nullable(),
+  parentDealerId: z.string().uuid('Invalid parent dealer ID').optional().nullable(),
+  mobileNumber: z.string().trim().regex(indianMobileRegex, 'Valid 10-digit mobile number required'),
+  password: z.string().min(6, 'Password must be at least 6 characters'),
+  shopName: z.string().trim().min(2, 'Shop name is required'),
+  ownerName: z.string().trim().min(2, 'Owner name is required'),
+  dealerType: z.enum([DEALER_TYPE.DEALER, DEALER_TYPE.RETAILER]),
+  aadharNumber: z.string().trim().regex(aadharRegex, 'Aadhar must be exactly 12 digits').optional().nullable(),
+  gstNumber: z.string().trim().optional().nullable(),
+  address: z.string().trim().optional().nullable(),
+  city: z.string().trim().optional().nullable(),
+  state: z.string().trim().optional().nullable(),
+  pincode: z.string().trim().optional().nullable(),
+  latitude: z.number().optional().nullable(),
+  longitude: z.number().optional().nullable(),
+  source: z
+    .enum([
+      DEALER_SOURCE.SELF_REGISTERED,
+      DEALER_SOURCE.CREATED_BY_DISTRIBUTOR,
+      DEALER_SOURCE.CREATED_BY_DEALER,
+    ])
+    .default(DEALER_SOURCE.SELF_REGISTERED),
+});
 
 export const signUpCustomerSchema = z.object({
   mobileNumber: z.string().trim().regex(indianMobileRegex, 'Valid 10-digit mobile number required'),

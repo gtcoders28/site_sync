@@ -7,6 +7,8 @@ import {
   ROLES,
   DISTRIBUTOR_STATUS,
   DEALER_STATUS,
+  DEALER_TYPE,
+  DEALER_SOURCE,
   CUSTOMER_STATUS,
   INFLUENCER_STATUS,
 } from '../../config/constants';
@@ -175,40 +177,75 @@ export class AuthService {
       pincode,
       latitude,
       longitude,
-      source = 'self_registered',
     } = data;
+
+    if (creatorUser?.role === ROLES.RETAILER) {
+      throw APIError.forbidden('Retailers cannot onboard dealers or sub-retailers.');
+    }
 
     await this._assertMobileUnique(mobileNumber);
 
-    // Validate that at least one parent exists (distributor_id or parent_dealer_id)
-    if (!distributorId && !parentDealerId) {
-      throw APIError.badRequest('Every dealer or retailer must have an assigned distributor or parent dealer.');
+    let resolvedDistributorId: string | null = distributorId || null;
+    let resolvedParentDealerId: string | null = parentDealerId || null;
+
+    // Strictly derive status & source server-side from creatorUser
+    let status: string = DEALER_STATUS.PENDING;
+    let actualSource: string = DEALER_SOURCE.SELF_REGISTERED;
+
+    if (creatorUser && (creatorUser.role === ROLES.DISTRIBUTOR || creatorUser.isPlatformOwner)) {
+      if (!creatorUser.isPlatformOwner && resolvedDistributorId && resolvedDistributorId !== creatorUser.distributorId) {
+        throw APIError.forbidden('You can only onboard dealers under your own distributorship.');
+      }
+      resolvedDistributorId = resolvedDistributorId || creatorUser.distributorId || creatorUser.id;
+      status = DEALER_STATUS.ACTIVE;
+      actualSource = DEALER_SOURCE.CREATED_BY_DISTRIBUTOR;
+    } else if (creatorUser && creatorUser.role === ROLES.DEALER) {
+      if (resolvedParentDealerId && resolvedParentDealerId !== creatorUser.dealerId) {
+        throw APIError.forbidden('You can only onboard retailers under your own dealership.');
+      }
+      resolvedParentDealerId = resolvedParentDealerId || creatorUser.dealerId || creatorUser.id;
+      status = DEALER_STATUS.ACTIVE;
+      actualSource = DEALER_SOURCE.CREATED_BY_DEALER;
+    } else {
+      status = DEALER_STATUS.PENDING;
+      actualSource = DEALER_SOURCE.SELF_REGISTERED;
     }
 
-    if (distributorId) {
-      const distRes = await query('SELECT distributor_id, status FROM distributors WHERE distributor_id = $1', [distributorId]);
+    // If neither distributorId nor parentDealerId is provided, default to the active Platform Owner Distributor
+    if (!resolvedDistributorId && !resolvedParentDealerId) {
+      const poRes = await query(
+        "SELECT distributor_id FROM distributors WHERE is_platform_owner = TRUE AND status = 'active' ORDER BY created_at ASC LIMIT 1"
+      );
+      if (poRes.rows.length === 0) {
+        throw APIError.badRequest('No active platform distributor found to assign this registration.');
+      }
+      resolvedDistributorId = poRes.rows[0].distributor_id;
+    }
+
+    if (resolvedDistributorId) {
+      const distRes = await query('SELECT distributor_id, status FROM distributors WHERE distributor_id = $1', [resolvedDistributorId]);
       if (distRes.rows.length === 0) {
         throw APIError.badRequest('Assigned distributor does not exist');
       }
-    }
-
-    if (parentDealerId) {
-      const parentDlrRes = await query('SELECT dealer_id, status FROM dealers WHERE dealer_id = $1', [parentDealerId]);
-      if (parentDlrRes.rows.length === 0) {
-        throw APIError.badRequest('Assigned parent dealer does not exist');
+      if (distRes.rows[0].status !== DISTRIBUTOR_STATUS.ACTIVE) {
+        throw APIError.badRequest('Assigned distributor is not currently active');
       }
     }
 
-    // Determine status & source
-    let status: string = DEALER_STATUS.PENDING;
-    let actualSource = source;
-
-    if (creatorUser && (creatorUser.role === ROLES.DISTRIBUTOR || creatorUser.isPlatformOwner || creatorUser.role === ROLES.DEALER || creatorUser.role === ROLES.RETAILER)) {
-      status = DEALER_STATUS.ACTIVE;
-      actualSource = creatorUser.role === ROLES.DISTRIBUTOR || creatorUser.isPlatformOwner ? 'created_by_distributor' : 'created_by_dealer';
-    } else {
-      status = DEALER_STATUS.PENDING;
-      actualSource = 'self_registered';
+    if (resolvedParentDealerId) {
+      const parentDlrRes = await query(
+        'SELECT dealer_id, dealer_type, status FROM dealers WHERE dealer_id = $1',
+        [resolvedParentDealerId]
+      );
+      if (parentDlrRes.rows.length === 0) {
+        throw APIError.badRequest('Assigned parent dealer does not exist');
+      }
+      if (parentDlrRes.rows[0].status !== DEALER_STATUS.ACTIVE) {
+        throw APIError.badRequest('Assigned parent dealer is not currently active');
+      }
+      if (parentDlrRes.rows[0].dealer_type !== DEALER_TYPE.DEALER) {
+        throw APIError.badRequest('Only active wholesale dealers can act as a parent dealer.');
+      }
     }
 
     const hashedPassword = await hashPassword(password);
@@ -227,8 +264,8 @@ export class AuthService {
       `;
 
       const dealerRes = await client.query(insertQuery, [
-        distributorId || null,
-        parentDealerId || null,
+        resolvedDistributorId,
+        resolvedParentDealerId,
         mobileNumber,
         hashedPassword,
         shopName,
@@ -251,8 +288,8 @@ export class AuthService {
 
       // If self-registered, create a pending registration request for the parent
       if (status === DEALER_STATUS.PENDING) {
-        const parentType = distributorId ? 'distributor' : 'dealer';
-        const parentId = distributorId || parentDealerId;
+        const parentType = resolvedParentDealerId ? 'dealer' : 'distributor';
+        const parentId = resolvedParentDealerId || resolvedDistributorId;
         await client.query(
           `INSERT INTO registration_requests (
             requester_type, requester_id, parent_type, parent_id, status
@@ -486,15 +523,18 @@ export class AuthService {
       );
     }
     if (!role || role === ROLES.DEALER || role === ROLES.RETAILER) {
-      searches.push(
-        query(
-          `SELECT dealer_id AS id, distributor_id, parent_dealer_id, mobile_number, password_hash, 
-                  shop_name, owner_name, dealer_type, invite_code, status, 
-                  (CASE WHEN dealer_type = 'retailer' THEN 'retailer' ELSE 'dealer' END) as detected_role 
-           FROM dealers WHERE mobile_number = $1`,
-          [mobileNumber]
-        )
-      );
+      let dealerSql = `
+        SELECT dealer_id AS id, distributor_id, parent_dealer_id, mobile_number, password_hash, 
+               shop_name, owner_name, dealer_type, invite_code, status, 
+               (CASE WHEN dealer_type = 'retailer' THEN 'retailer' ELSE 'dealer' END) as detected_role 
+        FROM dealers WHERE mobile_number = $1
+      `;
+      if (role === ROLES.DEALER) {
+        dealerSql += ` AND dealer_type = 'dealer'`;
+      } else if (role === ROLES.RETAILER) {
+        dealerSql += ` AND dealer_type = 'retailer'`;
+      }
+      searches.push(query(dealerSql, [mobileNumber]));
     }
     if (!role || role === ROLES.CUSTOMER) {
       searches.push(
@@ -677,7 +717,7 @@ export class AuthService {
 
   async getPublicDealers() {
     const res = await query(
-      "SELECT dealer_id, distributor_id, shop_name, owner_name, city FROM dealers WHERE status = 'active' ORDER BY shop_name ASC"
+      "SELECT dealer_id, distributor_id, shop_name, owner_name, dealer_type, city FROM dealers WHERE status = 'active' ORDER BY shop_name ASC"
     );
     return res.rows;
   }

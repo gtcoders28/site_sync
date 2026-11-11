@@ -1,12 +1,14 @@
 import { Request, Response, NextFunction } from 'express';
 import { authService } from './auth.service';
 import { APIResponse } from '../../utils/apiResponse';
+import { DEALER_TYPE } from '../../config/constants';
 import env from '../../config/env';
 
 export class AuthController {
   constructor() {
     this.createDistributor = this.createDistributor.bind(this);
     this.registerDealer = this.registerDealer.bind(this);
+    this.registerRetailer = this.registerRetailer.bind(this);
     this.registerCustomer = this.registerCustomer.bind(this);
     this.registerInfluencer = this.registerInfluencer.bind(this);
     this.signIn = this.signIn.bind(this);
@@ -36,6 +38,21 @@ export class AuthController {
       const message = result.requiresApproval
         ? 'Dealer registered successfully. Awaiting approval from assigned distributor.'
         : 'Dealer registered successfully.';
+      APIResponse.created(res, message, result);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async registerRetailer(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const result = await authService.signUpDealer(
+        { ...req.body, dealerType: DEALER_TYPE.RETAILER },
+        req.user
+      );
+      const message = result.requiresApproval
+        ? 'Retailer registered successfully. Awaiting approval from assigned parent.'
+        : 'Retailer registered successfully.';
       APIResponse.created(res, message, result);
     } catch (err) {
       next(err);

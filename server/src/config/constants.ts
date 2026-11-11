@@ -38,6 +38,7 @@ export const DEALER_TYPE = {
 export const DEALER_SOURCE = {
   SELF_REGISTERED: 'self_registered',
   CREATED_BY_DISTRIBUTOR: 'created_by_distributor',
+  CREATED_BY_DEALER: 'created_by_dealer',
 } as const;
 
 export const CUSTOMER_STATUS = {
